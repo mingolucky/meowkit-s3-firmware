@@ -20,21 +20,31 @@ void ui_PC_Monitor_screen_init(void)
 
     ui_temp1 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_temp1, &ui_img_temp1_full_png);
+    /* Découper l'image au lieu de la mettre à l'échelle : c'est ce qui
+     * permet de n'en révéler qu'une fraction, façon jauge. */
+    lv_img_set_size_mode(ui_temp1, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_temp1, LV_SIZE_CONTENT);   /// 100
     lv_obj_set_height(ui_temp1, LV_SIZE_CONTENT);    /// 20
-    lv_obj_set_x(ui_temp1, -85);
+    lv_obj_set_x(ui_temp1, 25);
     lv_obj_set_y(ui_temp1, -10);
-    lv_obj_set_align(ui_temp1, LV_ALIGN_CENTER);
+    /* Ancré à gauche : la barre se vide par la droite quand sa largeur
+     * diminue, au lieu de rétrécir symétriquement. */
+    lv_obj_set_align(ui_temp1, LV_ALIGN_LEFT_MID);
     lv_obj_add_flag(ui_temp1, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_temp1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
     ui_temp2 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_temp2, &ui_img_temp1_full_png);
+    /* Découper l'image au lieu de la mettre à l'échelle : c'est ce qui
+     * permet de n'en révéler qu'une fraction, façon jauge. */
+    lv_img_set_size_mode(ui_temp2, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_temp2, LV_SIZE_CONTENT);   /// 100
     lv_obj_set_height(ui_temp2, LV_SIZE_CONTENT);    /// 20
-    lv_obj_set_x(ui_temp2, -85);
+    lv_obj_set_x(ui_temp2, 25);
     lv_obj_set_y(ui_temp2, -40);
-    lv_obj_set_align(ui_temp2, LV_ALIGN_CENTER);
+    /* Ancré à gauche : la barre se vide par la droite quand sa largeur
+     * diminue, au lieu de rétrécir symétriquement. */
+    lv_obj_set_align(ui_temp2, LV_ALIGN_LEFT_MID);
     lv_obj_add_flag(ui_temp2, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_temp2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
@@ -106,21 +116,31 @@ void ui_PC_Monitor_screen_init(void)
 
     ui_temp3 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_temp3, &ui_img_temp1_full_png);
+    /* Découper l'image au lieu de la mettre à l'échelle : c'est ce qui
+     * permet de n'en révéler qu'une fraction, façon jauge. */
+    lv_img_set_size_mode(ui_temp3, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_temp3, LV_SIZE_CONTENT);   /// 100
     lv_obj_set_height(ui_temp3, LV_SIZE_CONTENT);    /// 20
-    lv_obj_set_x(ui_temp3, 30);
+    lv_obj_set_x(ui_temp3, 140);
     lv_obj_set_y(ui_temp3, 60);
-    lv_obj_set_align(ui_temp3, LV_ALIGN_CENTER);
+    /* Ancré à gauche : la barre se vide par la droite quand sa largeur
+     * diminue, au lieu de rétrécir symétriquement. */
+    lv_obj_set_align(ui_temp3, LV_ALIGN_LEFT_MID);
     lv_obj_add_flag(ui_temp3, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_temp3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
     ui_temp4 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_temp4, &ui_img_temp1_full_png);
+    /* Découper l'image au lieu de la mettre à l'échelle : c'est ce qui
+     * permet de n'en révéler qu'une fraction, façon jauge. */
+    lv_img_set_size_mode(ui_temp4, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_temp4, LV_SIZE_CONTENT);   /// 100
     lv_obj_set_height(ui_temp4, LV_SIZE_CONTENT);    /// 20
-    lv_obj_set_x(ui_temp4, 30);
+    lv_obj_set_x(ui_temp4, 140);
     lv_obj_set_y(ui_temp4, 90);
-    lv_obj_set_align(ui_temp4, LV_ALIGN_CENTER);
+    /* Ancré à gauche : la barre se vide par la droite quand sa largeur
+     * diminue, au lieu de rétrécir symétriquement. */
+    lv_obj_set_align(ui_temp4, LV_ALIGN_LEFT_MID);
     lv_obj_add_flag(ui_temp4, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_temp4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
@@ -214,3 +234,38 @@ void ui_PC_Monitor_screen_init(void)
 
 }
 
+
+/* ── Jauges ───────────────────────────────────────────────────────────
+ * Les cinq barres dégradées de cet écran étaient créées puis jamais
+ * touchées : elles affichaient le dégradé complet quel que soit l'état de
+ * la machine. Les quatre horizontales sont désormais pilotées.
+ * (ui_Image5, la barre verticale du bloc mémoire, est laissée telle quelle :
+ * son sens de remplissage et son ancrage demandent une décision de design.)
+ */
+#define GAUGE_W        100
+#define GAUGE_TEMP_MIN  30   /* °C — en dessous, barre vide */
+#define GAUGE_TEMP_MAX  90   /* °C — au-dessus, barre pleine */
+
+static void gauge_set(lv_obj_t * bar, int pct)
+{
+    if (!bar) return;
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    lv_obj_set_width(bar, (GAUGE_W * pct) / 100);
+}
+
+static int gauge_temp_pct(int celsius)
+{
+    if (celsius <= GAUGE_TEMP_MIN) return 0;
+    if (celsius >= GAUGE_TEMP_MAX) return 100;
+    return ((celsius - GAUGE_TEMP_MIN) * 100) / (GAUGE_TEMP_MAX - GAUGE_TEMP_MIN);
+}
+
+void ui_pc_monitor_set_gauges(int cpu_temp_c, int cpu_load_pct,
+                              int gpu_temp_c, int gpu_load_pct)
+{
+    gauge_set(ui_temp2, gauge_temp_pct(cpu_temp_c));   /* température CPU */
+    gauge_set(ui_temp1, cpu_load_pct);                 /* charge CPU      */
+    gauge_set(ui_temp3, gauge_temp_pct(gpu_temp_c));   /* température GPU */
+    gauge_set(ui_temp4, gpu_load_pct);                 /* charge GPU      */
+}

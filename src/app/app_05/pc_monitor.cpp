@@ -83,6 +83,11 @@ void style_01(DEVICES* _device) {
     /*GPU LOAD*/
     lv_label_set_text(ui_gpu_percent, gpuString2.c_str());
 
+    /* Les quatre barres dégradées suivent désormais les valeurs affichées ;
+     * elles montraient jusqu'ici le dégradé complet en permanence. */
+    ui_pc_monitor_set_gauges(cpuString1.toInt(), cpuString2.toInt(),
+                             gpuString1.toInt(), gpuString2.toInt());
+
   //----------------------------------------SYSTEM  RAM TOTAL---------------------------------------------------//
   /*SYSTEM RAM String*/
   int ramStringStart = inputString.indexOf("R", gpuStringLimit);
