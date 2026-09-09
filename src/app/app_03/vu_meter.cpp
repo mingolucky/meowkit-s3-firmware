@@ -9,6 +9,7 @@
  */
 #include "vu_meter.h"
 #include <SD_MMC.h>
+#include "vu_face.h"
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -23,11 +24,10 @@ namespace MOONCAKE::APPS
 static constexpr char  BG_PATH[] = "/vu_meter/vu_meter_bg.png";
 
 /* ── Angle calibration ─────────────────────────────────────────────
- * ANGLE_MIN → far-left mark  ("−30 VU")
- * ANGLE_MAX → far-right mark ("+3  VU")
- * Angles in degrees, clockwise from straight-up (0°). */
-static constexpr float ANGLE_MIN = -45.0f;
-static constexpr float ANGLE_MAX =  35.0f;
+ *
+ * La plage balayée n'est plus une constante : elle dépend du fond affiché.
+ * Voir _angleMin / _angleMax dans vu_meter.h — l'illustration de la carte SD
+ * et la face dessinée n'ont pas la même graduation. */
 
 /* ── Needle sprite geometry ─────────────────────────────────────── */
 static constexpr int NEEDLE_W     = 12;
@@ -104,7 +104,7 @@ void App03::onOpen()
     _initState        = InitState::Loading;
     _taskRun          = false;
     _captureTask      = nullptr;
-    _latestAngle.store(ANGLE_MIN);
+    _latestAngle.store(_angleMin);
     _lastFrameMs      = 0;
     _lastRenderAngle  = -999.0f;
     _pivotX           = kPivotX;
@@ -193,14 +193,20 @@ void App03::_doHeavyInit()
     {
         size_t bgLen = 0;
         uint8_t* bgBuf = _readSD(BG_PATH, bgLen);
-        if (!bgBuf) {
-            delSp(_bgPatch); delSp(_workSpr);
-            _codec.stop(); _codec.end(); i2s_driver_uninstall(I2S_NUM_1);
-            fail("BG PNG not found"); return;
+        if (bgBuf) {
+            _device->Lcd.drawPng(bgBuf, bgLen, 0, 0);           // visible immediately
+            _bgPatch->drawPng(bgBuf, bgLen, -kPatchX, -kPatchY); // decode into reference
+            free(bgBuf);
+        } else {
+            /* Pas de carte, ou carte sans les ressources : on dessine la face
+             * plutôt que d'échouer. L'app reste utilisable sur un appareil neuf,
+             * et l'aiguille adopte le balayage que cette face gradue. */
+            _angleMin = VU_FACE_ANGLE_MIN;
+            _angleMax = VU_FACE_ANGLE_MAX;
+            _latestAngle.store(_angleMin);
+            vu_face_draw(&_device->Lcd, 0, 0);
+            vu_face_draw(_bgPatch, -kPatchX, -kPatchY);
         }
-        _device->Lcd.drawPng(bgBuf, bgLen, 0, 0);           // visible immediately
-        _bgPatch->drawPng(bgBuf, bgLen, -kPatchX, -kPatchY); // decode into reference
-        free(bgBuf);
     }
 
     /* 6. Needle sprite — pivot row = NEEDLE_TIP_Y + kNeedleLen */
@@ -326,7 +332,7 @@ void App03::_captureLoop()
     int16_t* buf = (int16_t*)heap_caps_malloc(kBufBytes, MALLOC_CAP_INTERNAL);
     if (!buf) { _taskRun = false; return; }
 
-    float   smooth = ANGLE_MIN;
+    float   smooth = _angleMin;
     int32_t dcAcc  = 0;
 
     while (_taskRun) {
@@ -345,7 +351,7 @@ void App03::_captureLoop()
         float db     = _calcAmplitude(buf, mono);
         db           = std::max(kDbFloor, std::min(kDbCeil, db));
         float norm   = (db - kDbFloor) / (kDbCeil - kDbFloor);
-        float target = ANGLE_MIN + norm * (ANGLE_MAX - ANGLE_MIN);
+        float target = _angleMin + norm * (_angleMax - _angleMin);
 
         float alpha  = (target > smooth) ? kEmaAttack : kEmaRelease;
         smooth      += alpha * (target - smooth);

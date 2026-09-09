@@ -55,6 +55,9 @@ namespace MOONCAKE::APPS
         LGFX_Sprite* _needleSprite = nullptr;
 
         /* ── Tuning ─────────────────────────────────────────────────── */
+        static constexpr float ANGLE_MIN_DEFAULT = -45.0f;  // fond d'origine
+        static constexpr float ANGLE_MAX_DEFAULT =  35.0f;
+
         static constexpr int32_t kNeedleLen = 150;   // tip-to-pivot (px)
 
         static constexpr int32_t kPatchX = 50;
@@ -72,6 +75,13 @@ namespace MOONCAKE::APPS
 
         float _pivotX = kPivotX;
         float _pivotY = kPivotY;
+
+        /* Plage réellement balayée. Elle dépend du fond affiché : l'illustration
+         * de la carte SD est graduée pour -45°/+35°, la face dessinée pour un
+         * balayage symétrique. L'aiguille doit suivre, sinon elle ne pointerait
+         * pas ses propres graduations. */
+        float _angleMin = ANGLE_MIN_DEFAULT;
+        float _angleMax = ANGLE_MAX_DEFAULT;
 
         /* ── DSP task ── */
         static void _captureTaskEntry(void* arg);
