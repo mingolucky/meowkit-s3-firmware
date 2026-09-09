@@ -1658,7 +1658,13 @@ lv_font_t ui_font_name_14 = {
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
 #if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
-    .fallback = NULL,
+    /* This font is generated with -r 0x20-0x7f (ASCII only), so anything above
+     * U+007F renders as a placeholder box. The UI uses "°C" (U+00B0) on the PC
+     * Monitor screen, which showed as a box. Falling back to the built-in
+     * Montserrat -- generated with -r 0x20-0x7F,0xB0,0x2022, so it carries the
+     * degree sign -- fixes it without regenerating this font, whose source
+     * Oswald-Bold.ttf is not in the repository. */
+    .fallback = &lv_font_montserrat_14,
 #endif
     .user_data = NULL,
 };
