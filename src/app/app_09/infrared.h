@@ -92,7 +92,6 @@ namespace MOONCAKE::APPS
         void _drawHeader(const char* title);
         void _drawMenuItem(int y, int index, const char* text, bool selected);
         void _drawMenuItem2(int y, int index, const char* title, const char* sub, bool selected);
-        void _drawFooter(const char* left, const char* right);
         void _drawFooter3(const char* dirHint, const char* aHint, const char* bHint);
         void _drawMsgBox(const char* line1, const char* line2 = nullptr);
         void _drawNameEditor();
@@ -171,6 +170,9 @@ namespace MOONCAKE::APPS
         char      _savePath[128];
         char      _deletePath[128];
         bool      _deleteFolder = false;
+        bool      _saveFolderPending = false;
+        bool      _restoreFolderName = false;
+        bool      _preserveSignalName = false;
 
         /* save-name editor */
         char _editBuf[24];

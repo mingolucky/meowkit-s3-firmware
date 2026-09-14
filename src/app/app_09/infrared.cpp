@@ -182,7 +182,8 @@ static const char* kNameKeys[] = {
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
     "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
     "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3",
-    "4", "5", "6", "7", "8", "9", "_", "-", ".", "[DEL]"
+    "4", "5", "6", "7", "8", "9", "_", "-", ".", "[DEL]",
+    "<-", "OK"
 };
 static constexpr int kNameCols = 10;
 static constexpr int kNameKeyCount = (int)(sizeof(kNameKeys) / sizeof(kNameKeys[0]));
@@ -384,14 +385,25 @@ namespace MOONCAKE::APPS
         hp::drawScrollbar2(_device->Lcd, _menuCount, _scrollOffset, MENU2_VISIBLE);
     }
 
-    void App09::_drawFooter(const char* left, const char* right)
-    {
-        hp::drawFooter(_device->Lcd, left, right);
-    }
-
     void App09::_drawFooter3(const char* dirHint, const char* aHint, const char* bHint)
     {
-        hp::drawFooter3(_device->Lcd, dirHint, aHint, bHint);
+        char actions[48] = {};
+        if (aHint && aHint[0] && bHint && bHint[0]) snprintf(actions, sizeof(actions), "%s %s", aHint, bHint);
+        else snprintf(actions, sizeof(actions), "%s%s", aHint ? aHint : "", bHint ? bHint : "");
+
+        auto& Lcd = _device->Lcd;
+        Lcd.fillRect(1, hp::FTR_SEP + 1, hp::W - 2, hp::FTR_BOTTOM - hp::FTR_SEP - 1, hp::COL_BG);
+        Lcd.setFont(&fonts::efontCN_16);
+        Lcd.setTextColor(hp::COL_FG, hp::COL_BG);
+        if (dirHint && dirHint[0]) {
+            Lcd.setCursor(hp::PAD_X, hp::FTR_TXT);
+            Lcd.print(dirHint);
+        }
+        if (actions[0]) {
+            int tw = (int)strlen(actions) * 8;
+            Lcd.setCursor(hp::W - tw - hp::PAD_X, hp::FTR_TXT);
+            Lcd.print(actions);
+        }
     }
 
     void App09::_drawMsgBox(const char* line1, const char* line2)
@@ -542,7 +554,7 @@ namespace MOONCAKE::APPS
     {
         _drawHeader("Signal Received");
         hp::drawHeader(_device->Lcd, "Signal Received", "OK", hp::COL_FG);
-        _drawFooter3("[O]Retry", "[A]Send", "[B]Save");
+        _drawFooter3("[^v<>]Retry", "[A]Send", "[B]Save");
 
         auto& Lcd = _device->Lcd;
         int y = MENU_Y0;
@@ -579,7 +591,7 @@ namespace MOONCAKE::APPS
 
     void App09::_runLearnResult()
     {
-        /* [O] = joystick: any direction triggers Retry */
+        /* Any joystick direction triggers Retry. */
         if (_device->button.Up.pressed()    ||
             _device->button.Down.pressed()  ||
             _device->button.Left.pressed()  ||
@@ -643,13 +655,29 @@ namespace MOONCAKE::APPS
         if (_device->button.A.pressed()) {
             if (_menuSel == 0) {
                 strcpy(_saveDir, IR_DIR);
+                _saveFolderPending = false;
+                _restoreFolderName = false;
                 _switchScene(IrScene::LearnSaveName);
             } else {
                 strcpy(_savePickerDir, IR_DIR);
-                _switchScene(_menuSel == 1 ? IrScene::LearnSaveFolderPicker : IrScene::LearnSaveFolderName);
+                _saveFolderPending = false;
+                if (_menuSel == 1) {
+                    _restoreFolderName = false;
+                    _menuSel = 0;
+                    _scrollOffset = 0;
+                    _switchScene(IrScene::LearnSaveFolderPicker);
+                } else {
+                    _switchScene(IrScene::LearnSaveFolderName);
+                }
             }
+            return;
         }
-        if (_device->button.B.pressed()) _switchScene(IrScene::LearnResult);
+        if (_device->button.B.pressed()) {
+            _saveFolderPending = false;
+            _preserveSignalName = false;
+            _restoreFolderName = false;
+            _switchScene(IrScene::LearnResult);
+        }
     }
 
     void App09::_enterLearnSaveFolderPicker()
@@ -663,7 +691,9 @@ namespace MOONCAKE::APPS
         _menuCount = _fileList.size();
 
         _drawHeader("CHOOSE FOLDER");
-        _drawFooter3("[^v]Select", "[A]Open", "[>]Use here");
+        const String* selected = _menuCount > 0 ? &_fileList[_menuSel + _scrollOffset] : nullptr;
+        const char* aHint = selected ? (_isUpEntry(*selected) ? "[A]Up" : "[A]Open") : nullptr;
+        _drawFooter3("[^v]Select [>]Use", aHint, "[B]Back");
         if (_menuCount == 0) {
             hp::clearContent(_device->Lcd);
             _device->Lcd.setFont(&fonts::efontCN_16);
@@ -685,20 +715,15 @@ namespace MOONCAKE::APPS
 
     void App09::_runLearnSaveFolderPicker()
     {
-        if (_device->button.Right.pressed()) {
-            strcpy(_saveDir, _savePickerDir);
-            _switchScene(IrScene::LearnSaveName);
+        if (_device->button.B.pressed()) {
+            _switchScene(IrScene::LearnSaveLocation);
             return;
         }
-        if (_device->button.B.pressed()) {
-            if (strcmp(_savePickerDir, IR_DIR) == 0) _switchScene(IrScene::LearnSaveLocation);
-            else {
-                char* slash = strrchr(_savePickerDir, '/');
-                if (slash && slash != _savePickerDir) *slash = '\0';
-                _menuSel = 0;
-                _scrollOffset = 0;
-                _enterLearnSaveFolderPicker();
-            }
+        if (_device->button.Right.pressed()) {
+            strcpy(_saveDir, _savePickerDir);
+            _saveFolderPending = false;
+            _restoreFolderName = false;
+            _switchScene(IrScene::LearnSaveName);
             return;
         }
         if (_menuCount == 0) return;
@@ -741,161 +766,209 @@ namespace MOONCAKE::APPS
 
     void App09::_enterLearnSaveName()
     {
-        strncpy(_editBuf, _learnedSig.name, sizeof(_editBuf) - 1);
-        _editBuf[sizeof(_editBuf) - 1] = '\0';
+        if (!_preserveSignalName) {
+            strncpy(_editBuf, _learnedSig.name, sizeof(_editBuf) - 1);
+            _editBuf[sizeof(_editBuf) - 1] = '\0';
+        }
+        _preserveSignalName = false;
         _editPos = strlen(_editBuf);
         _editCharIdx = 0;
         _vkSel = 0;
 
         _drawHeader("SAVE SIGNAL");
-        _drawFooter3("[^v<>]Move", "[A]Select", "[B]Save");
-
+        _drawFooter3("[^v<>]Move", "[A]Select", "[B]Back");
         _drawNameEditor();
     }
 
     void App09::_runLearnSaveName()
     {
-        bool redraw = false;
-        if (_device->button.Up.pressed() && _vkSel >= kNameCols) {
-            _vkSel -= kNameCols;
-            redraw = true;
-        }
-        if (_device->button.Down.pressed() && _vkSel + kNameCols < kNameKeyCount) {
-            _vkSel += kNameCols;
-            redraw = true;
-        }
-        if (_device->button.Left.pressed() && (_vkSel % kNameCols) > 0) {
-            _vkSel--;
-            redraw = true;
-        }
-        if (_device->button.Right.pressed() && (_vkSel % kNameCols) < (kNameCols - 1) && _vkSel + 1 < kNameKeyCount) {
-            _vkSel++;
-            redraw = true;
-        }
-
-        if (_device->button.A.pressed()) {
-            const char* key = kNameKeys[_vkSel];
-            int nameLen = strlen(_editBuf);
-            if (strcmp(key, "[DEL]") == 0) {
-                if (nameLen > 0) {
-                    _editBuf[nameLen - 1] = '\0';
-                    redraw = true;
-                }
-            } else if (nameLen < (int)sizeof(_editBuf) - 1) {
-                _editBuf[nameLen] = key[0];
-                _editBuf[nameLen + 1] = '\0';
-                redraw = true;
-            }
-        }
-
-        if (redraw) _drawNameEditor();
-
         if (_device->button.B.pressed()) {
-            int nameLen = strlen(_editBuf);
-            while (nameLen > 0 && (_editBuf[nameLen-1] == ' ' || _editBuf[nameLen-1] == '_')) {
-                _editBuf[--nameLen] = '\0';
+            if (_saveFolderPending) {
+                const char* name = strrchr(_saveDir, '/');
+                strncpy(_editBuf, name ? name + 1 : _saveDir, sizeof(_editBuf) - 1);
+                _editBuf[sizeof(_editBuf) - 1] = '\0';
+                _restoreFolderName = true;
+                _switchScene(IrScene::LearnSaveFolderName);
+            } else {
+                _preserveSignalName = true;
+                _switchScene(IrScene::LearnSaveLocation);
             }
-            if (nameLen == 0) strcpy(_editBuf, "Signal");
-
-            strncpy(_learnedSig.name, _editBuf, sizeof(_learnedSig.name) - 1);
-
-            char path[128];
-            int written = snprintf(path, sizeof(path), "%s/%s.ir", _saveDir, _editBuf);
-            if (written < 0 || static_cast<size_t>(written) >= sizeof(path)) {
-                _drawMsgBox("Path too long!", "Use a shorter name");
-                delay(1500);
-                _sceneDirty = true;
-                return;
-            }
-
-            if (SD_MMC.exists(path)) {
-                strcpy(_savePath, path);
-                _switchScene(IrScene::LearnSaveExistingConfirm);
-                return;
-            }
-            bool ok = _saveSignalToFile(_saveDir, _editBuf, _learnedSig);
-            _drawMsgBox(ok ? "Signal saved!" : "Save FAILED!", ok ? path : "Check SD card");
-            delay(1500);
-            _switchScene(IrScene::MainMenu);
-        }
-    }
-
-    void App09::_enterLearnSaveExistingConfirm()
-    {
-        _drawHeader("ADD SIGNAL?");
-        const char* name = strrchr(_savePath, '/');
-        _drawMsgBox("Append to existing?", name ? name + 1 : _savePath);
-        _drawFooter("[A]Append", "[B]Rename");
-    }
-
-    void App09::_runLearnSaveExistingConfirm()
-    {
-        if (_device->button.B.pressed()) {
-            _switchScene(IrScene::LearnSaveName);
             return;
         }
-        if (_device->button.A.pressed()) {
-            bool ok = _appendSignalToFile(_savePath, _learnedSig);
-            _drawMsgBox(ok ? "Signal saved!" : "Save FAILED!", ok ? _savePath : "Check SD card");
-            delay(1500);
-            _switchScene(IrScene::MainMenu);
-        }
-    }
 
-    void App09::_enterLearnSaveFolderName()
-    {
-        _editBuf[0] = '\0';
-        _vkSel = 0;
-        _drawHeader("NEW FOLDER");
-        _drawFooter3("[^v<>]Move", "[A]Select", "[B]Create");
-        _drawNameEditor();
-    }
-
-    void App09::_runLearnSaveFolderName()
-    {
         bool redraw = false;
         if (_device->button.Up.pressed() && _vkSel >= kNameCols) { _vkSel -= kNameCols; redraw = true; }
         if (_device->button.Down.pressed() && _vkSel + kNameCols < kNameKeyCount) { _vkSel += kNameCols; redraw = true; }
         if (_device->button.Left.pressed() && (_vkSel % kNameCols) > 0) { _vkSel--; redraw = true; }
         if (_device->button.Right.pressed() && (_vkSel % kNameCols) < kNameCols - 1 && _vkSel + 1 < kNameKeyCount) { _vkSel++; redraw = true; }
+
+        bool save = false;
         if (_device->button.A.pressed()) {
             const char* key = kNameKeys[_vkSel];
-            int nameLen = strlen(_editBuf);
-            if (strcmp(key, "[DEL]") == 0) {
-                if (nameLen > 0) { _editBuf[nameLen - 1] = '\0'; redraw = true; }
-            } else if (nameLen < (int)sizeof(_editBuf) - 1) {
-                _editBuf[nameLen] = key[0];
-                _editBuf[nameLen + 1] = '\0';
-                redraw = true;
+            if (strcmp(key, "<-") == 0) {
+                _saveFolderPending = false;
+                _preserveSignalName = false;
+                _restoreFolderName = false;
+                _switchScene(IrScene::LearnResult);
+                return;
+            }
+            if (strcmp(key, "OK") == 0) save = true;
+            else {
+                int nameLen = strlen(_editBuf);
+                if (strcmp(key, "[DEL]") == 0) {
+                    if (nameLen > 0) { _editBuf[nameLen - 1] = '\0'; redraw = true; }
+                } else if (nameLen < (int)sizeof(_editBuf) - 1) {
+                    _editBuf[nameLen] = key[0];
+                    _editBuf[nameLen + 1] = '\0';
+                    redraw = true;
+                }
             }
         }
         if (redraw) _drawNameEditor();
-        if (_device->button.B.pressed()) {
-            int nameLen = strlen(_editBuf);
-            while (nameLen > 0 && (_editBuf[nameLen - 1] == ' ' || _editBuf[nameLen - 1] == '_')) _editBuf[--nameLen] = '\0';
-            if (nameLen == 0) {
-                _drawMsgBox("Folder name needed");
-                delay(1200);
-                _sceneDirty = true;
-                return;
-            }
-            char path[sizeof(_saveDir)];
-            int written = snprintf(path, sizeof(path), "%s/%s", _savePickerDir, _editBuf);
-            if (written < 0 || static_cast<size_t>(written) >= sizeof(path)) {
-                _drawMsgBox("Path too long!", "Use a shorter name");
-                delay(1500);
-                _sceneDirty = true;
-                return;
-            }
-            if (!SD_MMC.exists(path) && !SD_MMC.mkdir(path)) {
+        if (!save) return;
+
+        int nameLen = strlen(_editBuf);
+        while (nameLen > 0 && (_editBuf[nameLen - 1] == ' ' || _editBuf[nameLen - 1] == '_')) _editBuf[--nameLen] = '\0';
+        if (nameLen == 0) strcpy(_editBuf, "Signal");
+        strncpy(_learnedSig.name, _editBuf, sizeof(_learnedSig.name) - 1);
+
+        char path[128];
+        int written = snprintf(path, sizeof(path), "%s/%s.ir", _saveDir, _editBuf);
+        if (written < 0 || static_cast<size_t>(written) >= sizeof(path)) {
+            _drawMsgBox("Path too long!", "Use a shorter name");
+            delay(1500);
+            _sceneDirty = true;
+            return;
+        }
+        if (SD_MMC.exists(path)) {
+            strcpy(_savePath, path);
+            _menuSel = 0;
+            _switchScene(IrScene::LearnSaveExistingConfirm);
+            return;
+        }
+
+        bool createdDir = false;
+        if (_saveFolderPending && !SD_MMC.exists(_saveDir)) {
+            if (!SD_MMC.mkdir(_saveDir)) {
                 _drawMsgBox("Folder create failed", "Check SD card");
                 delay(1500);
-                _switchScene(IrScene::LearnSaveLocation);
+                _sceneDirty = true;
                 return;
             }
-            strcpy(_saveDir, path);
-            _switchScene(IrScene::LearnSaveName);
+            createdDir = true;
         }
+        bool ok = _saveSignalToFile(_saveDir, _editBuf, _learnedSig);
+        if (!ok && createdDir) SD_MMC.rmdir(_saveDir);
+        if (ok) _saveFolderPending = false;
+        _drawMsgBox(ok ? "Signal saved!" : "Save FAILED!", ok ? path : "Check SD card");
+        delay(1500);
+        _switchScene(IrScene::MainMenu);
+    }
+
+    void App09::_enterLearnSaveExistingConfirm()
+    {
+        static const char* items[] = {"Append signal", "Choose another name", "Cancel save"};
+        _menuCount = sizeof(items) / sizeof(items[0]);
+        _drawHeader("FILE EXISTS");
+        _drawFooter3("[^v]Select", "[A]Choose", "[B]Back");
+        for (int i = 0; i < _menuCount; i++)
+            _drawMenuItem(MENU_Y0 + i * ITEM_H, i, items[i], i == _menuSel);
+    }
+
+    void App09::_runLearnSaveExistingConfirm()
+    {
+        if (_device->button.B.pressed()) {
+            _preserveSignalName = true;
+            _switchScene(IrScene::LearnSaveLocation);
+            return;
+        }
+        bool redraw = false;
+        if (_device->button.Up.pressed() && _menuSel > 0) { _menuSel--; redraw = true; }
+        if (_device->button.Down.pressed() && _menuSel < _menuCount - 1) { _menuSel++; redraw = true; }
+        if (redraw) { _enterLearnSaveExistingConfirm(); return; }
+        if (!_device->button.A.pressed()) return;
+
+        if (_menuSel == 0) {
+            bool ok = _appendSignalToFile(_savePath, _learnedSig);
+            _drawMsgBox(ok ? "Signal saved!" : "Save FAILED!", ok ? _savePath : "Check SD card");
+            delay(1500);
+            _switchScene(IrScene::MainMenu);
+        } else if (_menuSel == 1) {
+            _preserveSignalName = true;
+            _switchScene(IrScene::LearnSaveName);
+        } else {
+            _saveFolderPending = false;
+            _preserveSignalName = false;
+            _restoreFolderName = false;
+            _switchScene(IrScene::LearnResult);
+        }
+    }
+
+    void App09::_enterLearnSaveFolderName()
+    {
+        if (!_restoreFolderName) _editBuf[0] = '\0';
+        _restoreFolderName = false;
+        _vkSel = 0;
+        _drawHeader("NEW FOLDER");
+        _drawFooter3("[^v<>]Move", "[A]Select", "[B]Back");
+        _drawNameEditor();
+    }
+
+    void App09::_runLearnSaveFolderName()
+    {
+        if (_device->button.B.pressed()) {
+            _restoreFolderName = true;
+            _switchScene(IrScene::LearnSaveLocation);
+            return;
+        }
+        bool redraw = false;
+        if (_device->button.Up.pressed() && _vkSel >= kNameCols) { _vkSel -= kNameCols; redraw = true; }
+        if (_device->button.Down.pressed() && _vkSel + kNameCols < kNameKeyCount) { _vkSel += kNameCols; redraw = true; }
+        if (_device->button.Left.pressed() && (_vkSel % kNameCols) > 0) { _vkSel--; redraw = true; }
+        if (_device->button.Right.pressed() && (_vkSel % kNameCols) < kNameCols - 1 && _vkSel + 1 < kNameKeyCount) { _vkSel++; redraw = true; }
+
+        bool create = false;
+        if (_device->button.A.pressed()) {
+            const char* key = kNameKeys[_vkSel];
+            if (strcmp(key, "<-") == 0) {
+                _saveFolderPending = false;
+                _restoreFolderName = false;
+                _switchScene(IrScene::LearnResult);
+                return;
+            }
+            if (strcmp(key, "OK") == 0) create = true;
+            else {
+                int nameLen = strlen(_editBuf);
+                if (strcmp(key, "[DEL]") == 0) {
+                    if (nameLen > 0) { _editBuf[nameLen - 1] = '\0'; redraw = true; }
+                } else if (nameLen < (int)sizeof(_editBuf) - 1) {
+                    _editBuf[nameLen] = key[0];
+                    _editBuf[nameLen + 1] = '\0';
+                    redraw = true;
+                }
+            }
+        }
+        if (redraw) _drawNameEditor();
+        if (!create) return;
+
+        int nameLen = strlen(_editBuf);
+        while (nameLen > 0 && (_editBuf[nameLen - 1] == ' ' || _editBuf[nameLen - 1] == '_')) _editBuf[--nameLen] = '\0';
+        if (nameLen == 0) {
+            _drawMsgBox("Folder name needed");
+            delay(1200);
+            _sceneDirty = true;
+            return;
+        }
+        int written = snprintf(_saveDir, sizeof(_saveDir), "%s/%s", _savePickerDir, _editBuf);
+        if (written < 0 || static_cast<size_t>(written) >= sizeof(_saveDir)) {
+            _drawMsgBox("Path too long!", "Use a shorter name");
+            delay(1500);
+            _sceneDirty = true;
+            return;
+        }
+        _saveFolderPending = true;
+        _preserveSignalName = false;
+        _switchScene(IrScene::LearnSaveName);
     }
 
     /* ════════════════════════════════════════════════════════════
@@ -916,10 +989,10 @@ namespace MOONCAKE::APPS
 
         _drawHeader("Saved Remotes");
         const String* selected = _menuCount > 0 ? &_fileList[_menuSel + _scrollOffset] : nullptr;
-        const char* aHint = "[A]Send";
+        const char* aHint = selected ? "[A]Send" : nullptr;
         if (selected && _isUpEntry(*selected)) aHint = "[A]Up";
         else if (selected && _isFolderEntry(*selected)) aHint = "[A]Open";
-        _drawFooter3("[^v]Sel [>]Del", aHint, "[B]Back");
+        _drawFooter3(selected ? "[^v]Sel [>]Del" : nullptr, aHint, "[B]Back");
 
         if (_menuCount == 0) {
             auto& Lcd = _device->Lcd;
@@ -1094,7 +1167,7 @@ namespace MOONCAKE::APPS
         _drawHeader("DELETE");
         const char* name = strrchr(_deletePath, '/');
         _drawMsgBox(_deleteFolder ? "Delete empty folder?" : "Delete remote?", name ? name + 1 : _deletePath);
-        _drawFooter("[A]Delete", "[B]Cancel");
+        _drawFooter3(nullptr, "[A]Delete", "[B]Cancel");
     }
 
     void App09::_runDeleteConfirm()
@@ -1345,9 +1418,8 @@ namespace MOONCAKE::APPS
     void App09::_enterUniversalTV()
     {
         auto& Lcd = _device->Lcd;
-        hp::drawChrome(Lcd);
-        hp::drawHeader(Lcd, _univCatTitle, "REMOTE", hp::COL_FG);
-        hp::drawFooter3(Lcd, "[^v<>]Select", "[A]Blast", "[B]Back");
+        _drawHeader(_univCatTitle);
+        _drawFooter3("[^v<>]Select", "[A]Blast", "[B]Back");
 
         if (_univBlastIdx >= 0 && _univBlastIdx < kUnivKnownCount) {
             /* Known category: use hardcoded button definitions */
