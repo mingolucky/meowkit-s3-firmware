@@ -25,6 +25,7 @@ namespace MOONCAKE::APPS
     /* ── Flipper-compatible .ir signal storage ── */
     struct IrSignal {
         char     name[32];
+        char     parsedProtocol[16];
         bool     isRaw;
         /* decoded */
         decode_type_t protocol;

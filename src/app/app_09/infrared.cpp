@@ -1474,9 +1474,26 @@ namespace MOONCAKE::APPS
         }
     }
 
+    static void sendNec42(IRsend* send, uint32_t address, uint32_t command, bool extended) {
+        send->enableIROut(38); send->mark(9000); send->space(4500);
+        uint64_t bits = extended ? ((static_cast<uint64_t>(address & 0x03ffffffU) << 16) | (command & 0xffffU)) : (static_cast<uint64_t>(address & 0x1fffU) | (static_cast<uint64_t>((~address) & 0x1fffU) << 13) | (static_cast<uint64_t>(command & 0xffU) << 26) | (static_cast<uint64_t>((~command) & 0xffU) << 34));
+        for (uint8_t i = 0; i < 42; i++) { send->mark(560); send->space((bits >> i) & 1U ? 1690 : 560); }
+        send->mark(560); send->space(0);
+    }
+
+    static void sendRca(IRsend* send, uint32_t address, uint32_t command) {
+        send->enableIROut(56); send->mark(4000); send->space(4000);
+        uint32_t bits = (address & 0xfU) | ((command & 0xffU) << 4) | (((~address) & 0xfU) << 12) | (((~command) & 0xffU) << 16);
+        for (uint8_t i = 0; i < 24; i++) { send->mark(500); send->space((bits >> i) & 1U ? 1500 : 500); }
+        send->mark(500); send->space(0);
+    }
+
     bool App09::_txSignal(const IrSignal& sig)
     {
         if (!_irSend || !sig.isSupported) return false;
+        if (strcasecmp(sig.parsedProtocol, "NEC42") == 0) { sendNec42(_irSend, sig.address, sig.command, false); return true; }
+        if (strcasecmp(sig.parsedProtocol, "NEC42ext") == 0) { sendNec42(_irSend, sig.address, sig.command, true); return true; }
+        if (strcasecmp(sig.parsedProtocol, "RCA") == 0) { sendRca(_irSend, sig.address, sig.command); return true; }
 
         if (sig.isRaw) {
             if (sig.rawData.empty() || sig.rawData.size() > 1024) return false;
@@ -1490,7 +1507,8 @@ namespace MOONCAKE::APPS
             return true;
         }
 
-        return _irSend->send(sig.protocol, sig.value, sig.bits);
+        _irSend->send(sig.protocol, sig.value, sig.bits);
+        return true;
     }
 
     /* ════════════════════════════════════════════════════════════
@@ -1670,8 +1688,10 @@ namespace MOONCAKE::APPS
             else if (line.startsWith("protocol: ")) {
                 String proto = line.substring(10);
                 proto.trim();
+                strncpy(sig.parsedProtocol, proto.c_str(), sizeof(sig.parsedProtocol) - 1);
+                sig.parsedProtocol[sizeof(sig.parsedProtocol) - 1] = '\0';
                 sig.protocol = flipperProtoToType(proto.c_str());
-                sig.isSupported = (sig.protocol != UNKNOWN && strcasecmp(proto.c_str(), "NECext") != 0 && strcasecmp(proto.c_str(), "NEC42") != 0 && strcasecmp(proto.c_str(), "NEC42ext") != 0 && strcasecmp(proto.c_str(), "RCA") != 0);
+                sig.isSupported = (sig.protocol != UNKNOWN || strcasecmp(proto.c_str(), "NEC42") == 0 || strcasecmp(proto.c_str(), "NEC42ext") == 0 || strcasecmp(proto.c_str(), "RCA") == 0);
             }
             else if (line.startsWith("address: ")) {
                 sig.address = parseHexBytes(line.c_str() + 9);
