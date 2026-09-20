@@ -25,7 +25,7 @@ static constexpr int MENU_VISIBLE  = hp::LIST_VIS;         // 7 rows (single-lin
 static constexpr int MENU2_VISIBLE = hp::LIST2_VIS;        // 5 rows (two-line)
 
 static constexpr const char* IR_DIR = "/infrared";
-static constexpr const char* MEOW_IR_DIR = "/meowkit/infrared";
+static constexpr const char* LEARNED_DIR = "/infrared/learned";
 static constexpr const char* IR_LEARN_ICON_PATH = "/assets/ir_icon.png";
 
 /* ── Universal Remote directory (SD card: /infrared/universal/) ── */
@@ -258,8 +258,8 @@ namespace MOONCAKE::APPS
 
         /* Ensure IR directory exists on SD */
         if (!SD_MMC.exists(IR_DIR)) SD_MMC.mkdir(IR_DIR);
-        if (!SD_MMC.exists("/meowkit")) SD_MMC.mkdir("/meowkit");
-        if (!SD_MMC.exists(MEOW_IR_DIR)) SD_MMC.mkdir(MEOW_IR_DIR);
+        if (!SD_MMC.exists(LEARNED_DIR)) SD_MMC.mkdir(LEARNED_DIR);
+        if (!SD_MMC.exists(UNIV_DIR)) SD_MMC.mkdir(UNIV_DIR);
 
         strncpy(_remoteRoot, IR_DIR, sizeof(_remoteRoot) - 1);
         _remoteRoot[sizeof(_remoteRoot) - 1] = '\0';
@@ -441,8 +441,8 @@ namespace MOONCAKE::APPS
                     _switchScene(IrScene::RemoteList);
                     break;
                 case 3:
-                    strncpy(_remoteRoot, MEOW_IR_DIR, sizeof(_remoteRoot) - 1);
-                    strncpy(_remoteDir, MEOW_IR_DIR, sizeof(_remoteDir) - 1);
+                    strncpy(_remoteRoot, LEARNED_DIR, sizeof(_remoteRoot) - 1);
+                    strncpy(_remoteDir, LEARNED_DIR, sizeof(_remoteDir) - 1);
                     _switchScene(IrScene::RemoteList);
                     break;
             }
@@ -673,13 +673,13 @@ namespace MOONCAKE::APPS
             strncpy(_learnedSig.name, _editBuf, sizeof(_learnedSig.name) - 1);
 
             char path[128];
-            snprintf(path, sizeof(path), "%s/%s.ir", MEOW_IR_DIR, _editBuf);
+            snprintf(path, sizeof(path), "%s/%s.ir", LEARNED_DIR, _editBuf);
 
             bool ok;
             if (SD_MMC.exists(path)) {
                 ok = _appendSignalToFile(path, _learnedSig);
             } else {
-                ok = _saveSignalToFile(MEOW_IR_DIR, _editBuf, _learnedSig);
+                ok = _saveSignalToFile(LEARNED_DIR, _editBuf, _learnedSig);
             }
 
             if (ok) {
@@ -1745,6 +1745,11 @@ namespace MOONCAKE::APPS
             const char* slash = strrchr(file.name(), '/');
             String base = slash ? String(slash + 1) : String(file.name());
             if (file.isDirectory()) {
+                if (strcmp(dir, IR_DIR) == 0 && (base == "learned" || base == "universal")) {
+                    file.close();
+                    file = root.openNextFile();
+                    continue;
+                }
                 if (base.length() > 0) dirs.push_back(base + "/");
             } else if (base.endsWith(".ir") || base.endsWith(".IR")) {
                 files.push_back(base);
