@@ -18,6 +18,7 @@
 
 #include <mooncake.h>
 #include "../../bsp/devices.h"
+#include "../../system/mk_events.h"
 #include "../../ui/ui.h"
 #include <string>
 
@@ -50,8 +51,9 @@ private:
     void installApps();
     void loadAppsMenu();
     void handleAppSelection();
-    void handlePhysicalNav();    /* detect button edges → push to mk_events queue */
-    void processNavEvents();    /* consume queue → drive screen transitions */
+    void handlePhysicalNav();    /* detect button edges → drive navigation */
+    void processNavEvents();     /* consume one external navigation event */
+    void handleNavigationEvent(mk_event_t evt);
     void updateStatusBar();
     void returnToUI();      /* invalidate + reload LVGL screen after app exit */
 };

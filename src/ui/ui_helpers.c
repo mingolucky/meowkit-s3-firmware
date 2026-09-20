@@ -51,6 +51,13 @@ void _ui_slider_set_property(lv_obj_t * target, int id, int val)
 
 void _ui_screen_change(lv_obj_t ** target, lv_scr_load_anim_t fademode, int spd, int delay, void (*target_init)(void))
 {
+    /* Ignore navigation while a screen-load animation is still running.
+     * Starting another transition mid-slide can trigger an LVGL force-load path
+     * that crashes. scr_to_load is cleared when the current animation completes. */
+    lv_disp_t * d = lv_disp_get_default();
+    if(d && d->scr_to_load != NULL)
+        return;
+
     if(*target == NULL)
         target_init();
     lv_scr_load_anim(*target, fademode, spd, delay, false);

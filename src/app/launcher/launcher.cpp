@@ -71,6 +71,56 @@ static DEVICES* s_shutdown_dev = nullptr;
 /* True when the backlight has been turned off due to idle timeout. */
 static bool s_screen_off = false;
 
+static bool _screen_transition_active()
+{
+    lv_disp_t* disp = lv_disp_get_default();
+    return disp != nullptr && lv_disp_get_scr_prev(disp) != nullptr;
+}
+
+static const char* _screen_name(const lv_obj_t* screen)
+{
+    if (screen == ui_home)          return "home";
+    if (screen == ui_apps_menu)     return "apps";
+    if (screen == ui_settings)      return "settings";
+    if (screen == ui_sd_card_files) return "sd-files";
+    if (screen == ui_clock)         return "clock";
+    if (screen == ui_manual)        return "manual";
+    if (screen == ui_date_picker)   return "date-picker";
+    if (screen == ui_time_picker)   return "time-picker";
+    if (screen == ui_usb_msc)       return "usb-msc";
+    if (screen == ui_wifi)          return "wifi";
+    if (screen == ui_tabview)       return "tabview";
+    if (screen == ui_t9_keyboard)  return "wifi-keyboard";
+    return "other";
+}
+
+static const char* _navigation_target_name(const lv_obj_t* screen, mk_event_t event)
+{
+    if (screen == ui_home) {
+        if (event == MK_EVT_JOY_LEFT)  return "apps";
+        if (event == MK_EVT_JOY_RIGHT) return "settings";
+        if (event == MK_EVT_JOY_UP)    return "clock";
+        if (event == MK_EVT_JOY_DOWN)  return "sd-files";
+    }
+    if ((screen == ui_apps_menu && event == MK_EVT_JOY_RIGHT) ||
+        (screen == ui_settings && event == MK_EVT_JOY_LEFT) ||
+        (screen == ui_sd_card_files && event == MK_EVT_JOY_UP) ||
+        (screen == ui_clock && event == MK_EVT_JOY_DOWN) ||
+        (screen == ui_tabview && event == MK_EVT_BTN_A)) {
+        return "home";
+    }
+    if (screen == ui_manual && event == MK_EVT_BTN_B) return "clock";
+    if ((screen == ui_usb_msc || screen == ui_wifi || screen == ui_tabview) &&
+        event == MK_EVT_BTN_B) {
+        return "settings";
+    }
+    if (screen == ui_t9_keyboard && event == MK_EVT_BTN_B &&
+        !ui_t9_keyboard_is_connecting()) {
+        return "wifi";
+    }
+    return nullptr;
+}
+
 /* ── LED state machine ──────────────────────────────────────────────
  *
  *  Priority (high → low):
@@ -595,12 +645,10 @@ void Launcher::handleAppSelection()
  *    Pickers (ui_date_picker / ui_time_picker)
  *                A → commit Save then return to Home.
  */
-/* ── handlePhysicalNav: detect button edges → push to event queue ───────
+/* ── handlePhysicalNav: detect button edges → drive navigation ──────────
  *
- * Decoupled from navigation logic: this function only produces events.
- * processNavEvents() (below) consumes them and drives screen transitions.
- * This separation lets apps call mk_event_pop() to intercept events before
- * they reach the navigation layer.
+ * Physical inputs are dispatched immediately. They must not share the
+ * system event queue because delayed inputs can be applied to a later screen.
  * ──────────────────────────────────────────────────────────────────────── */
 void Launcher::handlePhysicalNav()
 {
@@ -612,7 +660,9 @@ void Launcher::handlePhysicalNav()
     const bool right = _device->button.Right.pressed();
 
     if (!a && !b && !up && !down && !left && !right) {
-        processNavEvents();
+        if (!_screen_transition_active()) {
+            processNavEvents();
+        }
         return;
     }
 
@@ -623,118 +673,147 @@ void Launcher::handlePhysicalNav()
         s_screen_off = false;
     }
 
-    /* Push typed events into the queue */
-    if (a)     mk_event_push(MK_EVT_BTN_A);
-    if (b)     mk_event_push(MK_EVT_BTN_B);
-    if (up)    mk_event_push(MK_EVT_JOY_UP);
-    if (down)  mk_event_push(MK_EVT_JOY_DOWN);
-    if (left)  mk_event_push(MK_EVT_JOY_LEFT);
-    if (right) mk_event_push(MK_EVT_JOY_RIGHT);
+    if (_screen_transition_active()) {
+        Serial.println("[Launcher] Navigation input ignored during screen transition");
+        return;
+    }
 
-    processNavEvents();
+    /* A single physical action per loop prevents simultaneous inputs from
+     * starting competing transitions. */
+    if (a)          handleNavigationEvent(MK_EVT_BTN_A);
+    else if (b)     handleNavigationEvent(MK_EVT_BTN_B);
+    else if (up)    handleNavigationEvent(MK_EVT_JOY_UP);
+    else if (down)  handleNavigationEvent(MK_EVT_JOY_DOWN);
+    else if (left)  handleNavigationEvent(MK_EVT_JOY_LEFT);
+    else if (right) handleNavigationEvent(MK_EVT_JOY_RIGHT);
 }
 
-/* ── processNavEvents: consume event queue → drive screen transitions ──── */
+/* ── processNavEvents: consume one external event ──────────────────────── */
 void Launcher::processNavEvents()
 {
-    mk_event_t evt;
-    while (mk_event_pop(&evt)) {
-        lv_obj_t* cur = lv_scr_act();
-        if (!cur) continue;
-
-        const bool a     = (evt == MK_EVT_BTN_A);
-        const bool b     = (evt == MK_EVT_BTN_B);
-        const bool up    = (evt == MK_EVT_JOY_UP);
-        const bool down  = (evt == MK_EVT_JOY_DOWN);
-        const bool left  = (evt == MK_EVT_JOY_LEFT);
-        const bool right = (evt == MK_EVT_JOY_RIGHT);
-
-        /* ── Home: joystick → cross navigation ── */
-        if (cur == ui_home) {
-            if (left)       _ui_screen_change(&ui_apps_menu,     LV_SCR_LOAD_ANIM_MOVE_RIGHT,  500, 0, &ui_apps_menu_screen_init);
-            else if (right) _ui_screen_change(&ui_settings,      LV_SCR_LOAD_ANIM_MOVE_LEFT,   500, 0, &ui_settings_screen_init);
-            else if (up)    _ui_screen_change(&ui_clock,         LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_clock_screen_init);
-            else if (down)  _ui_screen_change(&ui_sd_card_files, LV_SCR_LOAD_ANIM_MOVE_TOP,    500, 0, &ui_sd_card_files_screen_init);
-            continue;
-        }
-
-        /* ── Cross sub-screens: reverse joystick → Home ── */
-        if (cur == ui_apps_menu) {
-            if (right) { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_MOVE_LEFT,   500, 0, &ui_home_screen_init); continue; }
-        } else if (cur == ui_settings) {
-            if (left)  { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_MOVE_RIGHT,  500, 0, &ui_home_screen_init); continue; }
-        } else if (cur == ui_sd_card_files) {
-            if (up)    { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_home_screen_init); continue; }
-            if (b)     { ui_sd_card_files_action_back(); continue; }
-        } else if (cur == ui_clock) {
-            if (down)  { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_MOVE_TOP,    500, 0, &ui_home_screen_init); continue; }
-        } else if (cur == ui_manual) {
-            if (a)     { ui_manual_enter_focused(); continue; }
-            if (b)     { _ui_screen_change(&ui_clock, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_clock_screen_init); continue; }
-            if (left)  { ui_manual_set_focus(0); continue; }
-            if (right) { ui_manual_set_focus(1); continue; }
-            continue;
-        }
-
-        /* ── Pickers ── */
-        if (cur == ui_date_picker) {
-            if (a) ui_date_picker_action_save();
-            if (b) ui_date_picker_action_cancel();
-            continue;
-        }
-        if (cur == ui_time_picker) {
-            if (a) ui_time_picker_action_save();
-            if (b) ui_time_picker_action_cancel();
-            continue;
-        }
-
-        /* ── USB MSC screen ── */
-        if (cur == ui_usb_msc) {
-            if (a) {
-                if (usb_msc_is_active()) {
-                    usb_manager_release(USB_MODE_MSC);
-                    if (ui_usb_msc_label) lv_label_set_text(ui_usb_msc_label, "Ejected - safe to unplug");
-                    Serial.println("[Launcher] MSC ejected via A");
-                } else {
-                    if (ui_usb_msc_label) lv_label_set_text(ui_usb_msc_label, "Already ejected");
-                }
-                continue;
-            }
-            if (b) {
-                usb_manager_release(USB_MODE_MSC);
-                _ui_screen_change(&ui_settings, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_settings_screen_init);
-                continue;
-            }
-        }
-        if (cur == ui_wifi) {
-            if (a) { ui_wifi_connect_focused(); continue; }
-            if (b) { _ui_screen_change(&ui_settings, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_settings_screen_init); continue; }
-        }
-        if (cur == ui_tabview) {
-            if (a)    { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_FADE_ON, 350, 0, &ui_home_screen_init); continue; }
-            if (b)    { _ui_screen_change(&ui_settings, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_settings_screen_init); continue; }
-            if (up)   { uint16_t t = lv_tabview_get_tab_act(ui_tabview_settings); if (t > 0) lv_tabview_set_act(ui_tabview_settings, t-1, LV_ANIM_ON); continue; }
-            if (down) { uint16_t t = lv_tabview_get_tab_act(ui_tabview_settings); if (t < 4) lv_tabview_set_act(ui_tabview_settings, t+1, LV_ANIM_ON); continue; }
-            continue;
-        }
-        if (cur == ui_t9_keyboard) {
-            if (b) {
-                if (ui_t9_keyboard_is_connecting()) {
-                    ui_t9_keyboard_cancel_connect();
-                } else {
-                    ui_t9_keyboard_cleanup();
-                    _ui_screen_change(&ui_wifi, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_wifi_screen_init);
-                }
-                continue;
-            }
-            continue;
-        }
-
-        /* ── Fallback: A → Home ── */
-        if (a && cur != ui_apps_menu && cur != ui_settings &&
-                 cur != ui_sd_card_files && cur != ui_clock) {
-            _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, &ui_home_screen_init);
-        }
+    if (_screen_transition_active()) {
+        return;
     }
+
+    mk_event_t evt;
+    if (!mk_event_pop(&evt)) {
+        return;
+    }
+
+    handleNavigationEvent(evt);
 }
 
+/* ── handleNavigationEvent: drive screen transitions ───────────────────── */
+void Launcher::handleNavigationEvent(mk_event_t evt)
+{
+    lv_obj_t* cur = lv_scr_act();
+    if (!cur) {
+        return;
+    }
+
+    const bool a     = (evt == MK_EVT_BTN_A);
+    const bool b     = (evt == MK_EVT_BTN_B);
+    const bool up    = (evt == MK_EVT_JOY_UP);
+    const bool down  = (evt == MK_EVT_JOY_DOWN);
+    const bool left  = (evt == MK_EVT_JOY_LEFT);
+    const bool right = (evt == MK_EVT_JOY_RIGHT);
+
+    const char* target = _navigation_target_name(cur, evt);
+    if (target) {
+        Serial.printf("[Launcher] Navigation %s -> %s (event=0x%02X, heap=%lu)\n",
+                      _screen_name(cur), target, (unsigned)evt,
+                      (unsigned long)esp_get_free_heap_size());
+    }
+
+    /* ── Home: joystick → cross navigation ── */
+    if (cur == ui_home) {
+        if (left)       _ui_screen_change(&ui_apps_menu,     LV_SCR_LOAD_ANIM_MOVE_RIGHT,  500, 0, &ui_apps_menu_screen_init);
+        else if (right) _ui_screen_change(&ui_settings,      LV_SCR_LOAD_ANIM_MOVE_LEFT,   500, 0, &ui_settings_screen_init);
+        else if (up)    _ui_screen_change(&ui_clock,         LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_clock_screen_init);
+        else if (down)  _ui_screen_change(&ui_sd_card_files, LV_SCR_LOAD_ANIM_MOVE_TOP,    500, 0, &ui_sd_card_files_screen_init);
+        return;
+    }
+
+    /* ── Cross sub-screens: reverse joystick → Home ── */
+    if (cur == ui_apps_menu) {
+        if (right) { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_MOVE_LEFT,   500, 0, &ui_home_screen_init); return; }
+    } else if (cur == ui_settings) {
+        if (left)  { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_MOVE_RIGHT,  500, 0, &ui_home_screen_init); return; }
+    } else if (cur == ui_sd_card_files) {
+        if (up)    { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 500, 0, &ui_home_screen_init); return; }
+        if (b)     { ui_sd_card_files_action_back(); return; }
+    } else if (cur == ui_clock) {
+        if (down)  { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_MOVE_TOP,    500, 0, &ui_home_screen_init); return; }
+    } else if (cur == ui_manual) {
+        if (a)     { ui_manual_enter_focused(); return; }
+        if (b)     { _ui_screen_change(&ui_clock, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_clock_screen_init); return; }
+        if (left)  { ui_manual_set_focus(0); return; }
+        if (right) { ui_manual_set_focus(1); return; }
+        return;
+    }
+
+    /* ── Pickers ── */
+    if (cur == ui_date_picker) {
+        if (a) ui_date_picker_action_save();
+        if (b) ui_date_picker_action_cancel();
+        return;
+    }
+    if (cur == ui_time_picker) {
+        if (a) ui_time_picker_action_save();
+        if (b) ui_time_picker_action_cancel();
+        return;
+    }
+
+    /* ── USB MSC screen ── */
+    if (cur == ui_usb_msc) {
+        if (a) {
+            if (usb_msc_is_active()) {
+                usb_manager_release(USB_MODE_MSC);
+                if (ui_usb_msc_label) lv_label_set_text(ui_usb_msc_label, "Ejected - safe to unplug");
+                Serial.println("[Launcher] MSC ejected via A");
+            } else {
+                if (ui_usb_msc_label) lv_label_set_text(ui_usb_msc_label, "Already ejected");
+            }
+            return;
+        }
+        if (b) {
+            usb_manager_release(USB_MODE_MSC);
+            _ui_screen_change(&ui_settings, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_settings_screen_init);
+            return;
+        }
+    }
+    if (cur == ui_wifi) {
+        if (a) { ui_wifi_connect_focused(); return; }
+        if (b) { _ui_screen_change(&ui_settings, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_settings_screen_init); return; }
+    }
+    if (cur == ui_tabview) {
+        if (a)    { _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_FADE_ON, 350, 0, &ui_home_screen_init); return; }
+        if (b)    { _ui_screen_change(&ui_settings, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_settings_screen_init); return; }
+        if (up)   { uint16_t t = lv_tabview_get_tab_act(ui_tabview_settings); if (t > 0) lv_tabview_set_act(ui_tabview_settings, t-1, LV_ANIM_ON); return; }
+        if (down) { uint16_t t = lv_tabview_get_tab_act(ui_tabview_settings); if (t < 4) lv_tabview_set_act(ui_tabview_settings, t+1, LV_ANIM_ON); return; }
+        return;
+    }
+    if (cur == ui_t9_keyboard) {
+        if (b) {
+            if (ui_t9_keyboard_is_connecting()) {
+                ui_t9_keyboard_cancel_connect();
+            } else {
+                ui_t9_keyboard_cleanup();
+                _ui_screen_change(&ui_wifi, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_wifi_screen_init);
+            }
+            return;
+        }
+        if (!a) {
+            return;
+        }
+    }
+
+    /* ── Fallback: A → Home ── */
+    if (a && cur != ui_apps_menu && cur != ui_settings &&
+             cur != ui_sd_card_files && cur != ui_clock) {
+        Serial.printf("[Launcher] Navigation %s -> home (event=0x%02X, heap=%lu)\n",
+                      _screen_name(cur), (unsigned)evt,
+                      (unsigned long)esp_get_free_heap_size());
+        _ui_screen_change(&ui_home, LV_SCR_LOAD_ANIM_FADE_ON, 200, 0, &ui_home_screen_init);
+    }
+}
