@@ -192,6 +192,7 @@ void ui_settings_screen_init(void)
     lv_obj_set_y(ui_wifi_status, 19);
     lv_obj_add_flag(ui_wifi_status, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_wifi_status, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_clear_flag(ui_wifi_status, LV_OBJ_FLAG_OVERFLOW_VISIBLE); /// Keep marquee text inside the card
     lv_obj_set_style_radius(ui_wifi_status, 18, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_wifi_status, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_wifi_status, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
