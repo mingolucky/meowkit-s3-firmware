@@ -33,8 +33,10 @@ namespace MOONCAKE::APPS
         uint32_t address;
         uint32_t command;
         /* raw */
-        std::vector<uint16_t> rawData;   /* µs timings */
+        std::vector<uint32_t> rawData;   /* µs timings */
         uint32_t frequency;              /* carrier, default 38000 */
+        float dutyCycle;                 /* raw carrier duty cycle */
+        bool isSupported;                /* parsed/raw replay is supported */
     };
 
     struct IrRemote {
@@ -137,7 +139,7 @@ namespace MOONCAKE::APPS
         IRrecv*  _irRecv  = nullptr;
         IRsend*  _irSend  = nullptr;
 
-        void _txSignal(const IrSignal& sig);
+        bool _txSignal(const IrSignal& sig);
         void _startRx();
         void _stopRx();
 

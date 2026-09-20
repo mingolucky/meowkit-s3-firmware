@@ -1474,18 +1474,23 @@ namespace MOONCAKE::APPS
         }
     }
 
-    void App09::_txSignal(const IrSignal& sig)
+    bool App09::_txSignal(const IrSignal& sig)
     {
-        if (!_irSend) return;
+        if (!_irSend || !sig.isSupported) return false;
 
         if (sig.isRaw) {
-            if (!sig.rawData.empty()) {
-                _irSend->sendRaw(sig.rawData.data(), sig.rawData.size(),
-                                 sig.frequency / 1000);
+            if (sig.rawData.empty() || sig.rawData.size() > 1024) return false;
+            std::vector<uint16_t> timings;
+            timings.reserve(sig.rawData.size());
+            for (uint32_t timing : sig.rawData) {
+                if (timing == 0 || timing > UINT16_MAX) return false;
+                timings.push_back(static_cast<uint16_t>(timing));
             }
-        } else {
-            _irSend->send(sig.protocol, sig.value, sig.bits);
+            _irSend->sendRaw(timings.data(), timings.size(), sig.frequency / 1000);
+            return true;
         }
+
+        return _irSend->send(sig.protocol, sig.value, sig.bits);
     }
 
     /* ════════════════════════════════════════════════════════════
@@ -1577,7 +1582,7 @@ namespace MOONCAKE::APPS
         if (sig.isRaw) {
             f.println("type: raw");
             f.printf("frequency: %lu\n", sig.frequency);
-            f.println("duty_cycle: 0.330000");
+            f.printf("duty_cycle: %.6f\n", sig.dutyCycle);
             f.print("data:");
             for (size_t i = 0; i < sig.rawData.size(); i++) {
                 f.printf(" %u", sig.rawData[i]);
@@ -1628,6 +1633,8 @@ namespace MOONCAKE::APPS
             s.address   = 0;
             s.command   = 0;
             s.frequency = 38000;
+            s.dutyCycle = 0.33f;
+            s.isSupported = true;
         };
 
         IrSignal sig;
@@ -1664,6 +1671,7 @@ namespace MOONCAKE::APPS
                 String proto = line.substring(10);
                 proto.trim();
                 sig.protocol = flipperProtoToType(proto.c_str());
+                sig.isSupported = (sig.protocol != UNKNOWN && strcasecmp(proto.c_str(), "NECext") != 0 && strcasecmp(proto.c_str(), "NEC42") != 0 && strcasecmp(proto.c_str(), "NEC42ext") != 0 && strcasecmp(proto.c_str(), "RCA") != 0);
             }
             else if (line.startsWith("address: ")) {
                 sig.address = parseHexBytes(line.c_str() + 9);
@@ -1671,12 +1679,26 @@ namespace MOONCAKE::APPS
             else if (line.startsWith("command: ")) {
                 sig.command = parseHexBytes(line.c_str() + 9);
                 if (!sig.isRaw) {
-                    sig.bits = 32;
-                    sig.value = ((uint64_t)sig.address) | ((uint64_t)sig.command << 16);
+                    if (sig.protocol == NEC) {
+                        uint8_t address = static_cast<uint8_t>(sig.address);
+                        uint8_t command = static_cast<uint8_t>(sig.command);
+                        sig.bits = 32;
+                        sig.value = static_cast<uint32_t>(address) |
+                                     (static_cast<uint32_t>(static_cast<uint8_t>(~address)) << 8) |
+                                     (static_cast<uint32_t>(command) << 16) |
+                                     (static_cast<uint32_t>(static_cast<uint8_t>(~command)) << 24);
+                    } else {
+                        sig.bits = 32;
+                        sig.value = static_cast<uint64_t>(sig.address) |
+                                    (static_cast<uint64_t>(sig.command) << 16);
+                    }
                 }
             }
             else if (line.startsWith("frequency: ")) {
-                sig.frequency = line.substring(11).toInt();
+                sig.frequency = static_cast<uint32_t>(strtoul(line.c_str() + 11, nullptr, 10));
+            }
+            else if (line.startsWith("duty_cycle: ")) {
+                sig.dutyCycle = strtof(line.c_str() + 12, nullptr);
             }
             else if (line.startsWith("data: ")) {
                 const char* p = line.c_str() + 6;
@@ -1686,7 +1708,8 @@ namespace MOONCAKE::APPS
                     char* end;
                     long val = strtol(p, &end, 10);
                     if (end == p) break;
-                    sig.rawData.push_back((uint16_t)val);
+                    if (val <= 0 || val > UINT32_MAX || sig.rawData.size() >= 1024) { sig.isSupported = false; break; }
+                    sig.rawData.push_back(static_cast<uint32_t>(val));
                     p = end;
                 }
             }
