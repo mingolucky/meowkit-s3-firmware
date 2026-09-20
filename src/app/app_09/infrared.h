@@ -143,6 +143,8 @@ namespace MOONCAKE::APPS
         int  _menuSel      = 0;
         int  _menuCount    = 0;
         int  _scrollOffset = 0;
+        char _remoteRoot[96] = "/infrared";
+        char _remoteDir[96] = "/infrared";
 
         IrSignal  _learnedSig;
         IrRemote  _currentRemote;

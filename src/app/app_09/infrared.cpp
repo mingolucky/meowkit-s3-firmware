@@ -25,6 +25,7 @@ static constexpr int MENU_VISIBLE  = hp::LIST_VIS;         // 7 rows (single-lin
 static constexpr int MENU2_VISIBLE = hp::LIST2_VIS;        // 5 rows (two-line)
 
 static constexpr const char* IR_DIR = "/infrared";
+static constexpr const char* MEOW_IR_DIR = "/meowkit/infrared";
 static constexpr const char* IR_LEARN_ICON_PATH = "/assets/ir_icon.png";
 
 /* ── Universal Remote directory (SD card: /infrared/universal/) ── */
@@ -256,9 +257,11 @@ namespace MOONCAKE::APPS
         _learnIconPng = nullptr;
 
         /* Ensure IR directory exists on SD */
-        if (!SD_MMC.exists(IR_DIR)) {
-            SD_MMC.mkdir(IR_DIR);
-        }
+        if (!SD_MMC.exists(IR_DIR)) SD_MMC.mkdir(IR_DIR);
+        if (!SD_MMC.exists("/meowkit")) SD_MMC.mkdir("/meowkit");
+        if (!SD_MMC.exists(MEOW_IR_DIR)) SD_MMC.mkdir(MEOW_IR_DIR);
+        strcpy(_remoteRoot, IR_DIR);
+        strcpy(_remoteDir, IR_DIR);
 
         _switchScene(IrScene::MainMenu);
     }
@@ -390,9 +393,10 @@ namespace MOONCAKE::APPS
     static const char* kMainItems[] = {
         "Universal Remote",
         "Learn New Signal",
+        "Imported Remotes",
         "Saved Remotes",
     };
-    static constexpr int kMainCount = 3;
+    static constexpr int kMainCount = 4;
 
     void App09::_enterMainMenu()
     {
@@ -428,7 +432,8 @@ namespace MOONCAKE::APPS
             switch (_menuSel) {
                 case 0: _switchScene(IrScene::UniversalMenu); break;
                 case 1: _switchScene(IrScene::LearnWait);     break;
-                case 2: _switchScene(IrScene::RemoteList);    break;
+                case 2: strcpy(_remoteRoot, IR_DIR); strcpy(_remoteDir, IR_DIR); _switchScene(IrScene::RemoteList); break;
+                case 3: strcpy(_remoteRoot, MEOW_IR_DIR); strcpy(_remoteDir, MEOW_IR_DIR); _switchScene(IrScene::RemoteList); break;
             }
         }
         if (_device->button.B.pressed()) {
@@ -657,13 +662,13 @@ namespace MOONCAKE::APPS
             strncpy(_learnedSig.name, _editBuf, sizeof(_learnedSig.name) - 1);
 
             char path[128];
-            snprintf(path, sizeof(path), "%s/%s.ir", IR_DIR, _editBuf);
+            snprintf(path, sizeof(path), "%s/%s.ir", MEOW_IR_DIR, _editBuf);
 
             bool ok;
             if (SD_MMC.exists(path)) {
                 ok = _appendSignalToFile(path, _learnedSig);
             } else {
-                ok = _saveSignalToFile(IR_DIR, _editBuf, _learnedSig);
+                ok = _saveSignalToFile(MEOW_IR_DIR, _editBuf, _learnedSig);
             }
 
             if (ok) {
@@ -683,7 +688,7 @@ namespace MOONCAKE::APPS
     void App09::_enterRemoteList()
     {
         _fileList.clear();
-        _listIrFiles(IR_DIR, _fileList);
+        _listIrFiles(_remoteDir, _fileList);
         _menuCount = _fileList.size();
 
         _drawHeader("Saved Remotes");
@@ -697,7 +702,7 @@ namespace MOONCAKE::APPS
             Lcd.setCursor(20, 80);
             Lcd.print("No .ir files found");
             Lcd.setCursor(20, 105);
-            Lcd.printf("Place in: %s/", IR_DIR);
+            Lcd.printf("Place in: %s/", _remoteDir);
         } else {
             int end = _menuCount < MENU2_VISIBLE ? _menuCount : MENU2_VISIBLE;
             for (int i = 0; i < end; i++) {
@@ -751,7 +756,7 @@ namespace MOONCAKE::APPS
         if (_device->button.A.pressed()) {
             int idx = _menuSel + _scrollOffset;
             char path[128];
-            snprintf(path, sizeof(path), "%s/%s", IR_DIR, _fileList[idx].c_str());
+            snprintf(path, sizeof(path), "%s/%s", _remoteDir, _fileList[idx].c_str());
 
             if (_loadRemote(path, _currentRemote)) {
                 _switchScene(IrScene::RemoteView);
@@ -1638,7 +1643,7 @@ namespace MOONCAKE::APPS
         File f = SD_MMC.open(path, FILE_WRITE);
         if (!f) return false;
 
-        f.println("Filetype: IR signals file");
+        f.println("Filetype: MeowKit IR signals file");
         f.println("Version: 1");
         f.println("#");
         writeSignalEntry(f, sig);
