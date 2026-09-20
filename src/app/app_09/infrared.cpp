@@ -260,8 +260,11 @@ namespace MOONCAKE::APPS
         if (!SD_MMC.exists(IR_DIR)) SD_MMC.mkdir(IR_DIR);
         if (!SD_MMC.exists("/meowkit")) SD_MMC.mkdir("/meowkit");
         if (!SD_MMC.exists(MEOW_IR_DIR)) SD_MMC.mkdir(MEOW_IR_DIR);
-        strcpy(_remoteRoot, IR_DIR);
-        strcpy(_remoteDir, IR_DIR);
+
+        strncpy(_remoteRoot, IR_DIR, sizeof(_remoteRoot) - 1);
+        _remoteRoot[sizeof(_remoteRoot) - 1] = '\0';
+        strncpy(_remoteDir, IR_DIR, sizeof(_remoteDir) - 1);
+        _remoteDir[sizeof(_remoteDir) - 1] = '\0';
 
         _switchScene(IrScene::MainMenu);
     }
@@ -432,8 +435,16 @@ namespace MOONCAKE::APPS
             switch (_menuSel) {
                 case 0: _switchScene(IrScene::UniversalMenu); break;
                 case 1: _switchScene(IrScene::LearnWait);     break;
-                case 2: strcpy(_remoteRoot, IR_DIR); strcpy(_remoteDir, IR_DIR); _switchScene(IrScene::RemoteList); break;
-                case 3: strcpy(_remoteRoot, MEOW_IR_DIR); strcpy(_remoteDir, MEOW_IR_DIR); _switchScene(IrScene::RemoteList); break;
+                case 2:
+                    strncpy(_remoteRoot, IR_DIR, sizeof(_remoteRoot) - 1);
+                    strncpy(_remoteDir, IR_DIR, sizeof(_remoteDir) - 1);
+                    _switchScene(IrScene::RemoteList);
+                    break;
+                case 3:
+                    strncpy(_remoteRoot, MEOW_IR_DIR, sizeof(_remoteRoot) - 1);
+                    strncpy(_remoteDir, MEOW_IR_DIR, sizeof(_remoteDir) - 1);
+                    _switchScene(IrScene::RemoteList);
+                    break;
             }
         }
         if (_device->button.B.pressed()) {
@@ -682,12 +693,20 @@ namespace MOONCAKE::APPS
     }
 
     /* ════════════════════════════════════════════════════════════
-     *  Saved Remotes — File list
+     *  Saved Remotes — File list (with folder navigation)
      * ════════════════════════════════════════════════════════════ */
+
+    /* Entry helpers: a folder entry in _fileList carries a trailing '/'
+     * (added by _listIrFiles); the synthetic ".." entry (shown whenever
+     * _remoteDir isn't the IR root) reuses the same marker so rendering
+     * can treat "go up" and "go into a folder" uniformly. */
+    static bool _isFolderEntry(const String& s) { return s.endsWith("/"); }
+    static bool _isUpEntry(const String& s) { return s == ".."; }
 
     void App09::_enterRemoteList()
     {
         _fileList.clear();
+        if (strcmp(_remoteDir, _remoteRoot) != 0) _fileList.push_back("..");
         _listIrFiles(_remoteDir, _fileList);
         _menuCount = _fileList.size();
 
@@ -706,11 +725,19 @@ namespace MOONCAKE::APPS
         } else {
             int end = _menuCount < MENU2_VISIBLE ? _menuCount : MENU2_VISIBLE;
             for (int i = 0; i < end; i++) {
-                String name = _fileList[i + _scrollOffset];
-                int dot = name.lastIndexOf('.');
-                if (dot >= 0) name = name.substring(0, dot);
-                _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i,
-                               name.c_str(), "IR Remote", i == _menuSel);
+                const String& entry = _fileList[i + _scrollOffset];
+                if (_isUpEntry(entry)) {
+                    _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, "..", "Up one level", i == _menuSel);
+                } else if (_isFolderEntry(entry)) {
+                    String name = entry.substring(0, entry.length() - 1);
+                    _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, name.c_str(), "Folder", i == _menuSel);
+                } else {
+                    String name = entry;
+                    int dot = name.lastIndexOf('.');
+                    if (dot >= 0) name = name.substring(0, dot);
+                    _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i,
+                                   name.c_str(), "IR Remote", i == _menuSel);
+                }
             }
         }
     }
@@ -742,11 +769,19 @@ namespace MOONCAKE::APPS
             if (visible > MENU2_VISIBLE) visible = MENU2_VISIBLE;
             for (int i = 0; i < MENU2_VISIBLE; i++) {
                 if (i < visible) {
-                    String name = _fileList[i + _scrollOffset];
-                    int dot = name.lastIndexOf('.');
-                    if (dot >= 0) name = name.substring(0, dot);
-                    _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i,
-                                   name.c_str(), "IR Remote", i == _menuSel);
+                    const String& entry = _fileList[i + _scrollOffset];
+                    if (_isUpEntry(entry)) {
+                        _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, "..", "Up one level", i == _menuSel);
+                    } else if (_isFolderEntry(entry)) {
+                        String name = entry.substring(0, entry.length() - 1);
+                        _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, name.c_str(), "Folder", i == _menuSel);
+                    } else {
+                        String name = entry;
+                        int dot = name.lastIndexOf('.');
+                        if (dot >= 0) name = name.substring(0, dot);
+                        _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i,
+                                       name.c_str(), "IR Remote", i == _menuSel);
+                    }
                 } else {
                     _device->Lcd.fillRect(0, MENU_Y0 + i * ITEM2_H, SCR_W, ITEM2_H, hp::COL_BG);
                 }
@@ -755,20 +790,52 @@ namespace MOONCAKE::APPS
 
         if (_device->button.A.pressed()) {
             int idx = _menuSel + _scrollOffset;
-            char path[128];
-            snprintf(path, sizeof(path), "%s/%s", _remoteDir, _fileList[idx].c_str());
+            const String& entry = _fileList[idx];
 
-            if (_loadRemote(path, _currentRemote)) {
-                _switchScene(IrScene::RemoteView);
+            if (_isUpEntry(entry)) {
+                _goUpRemoteDir();
+            } else if (_isFolderEntry(entry)) {
+                String sub = entry.substring(0, entry.length() - 1);
+                size_t len = strlen(_remoteDir);
+                snprintf(_remoteDir + len, sizeof(_remoteDir) - len, "/%s", sub.c_str());
+                _menuSel = 0;
+                _scrollOffset = 0;
+                _enterRemoteList();
             } else {
-                _drawMsgBox("Failed to load!", path);
-                delay(1500);
-                _sceneDirty = true;
+                char path[128];
+                snprintf(path, sizeof(path), "%s/%s", _remoteDir, entry.c_str());
+
+                if (_loadRemote(path, _currentRemote)) {
+                    _switchScene(IrScene::RemoteView);
+                } else {
+                    _drawMsgBox("Failed to load!", path);
+                    delay(1500);
+                    _sceneDirty = true;
+                }
             }
         }
         if (_device->button.B.pressed()) {
-            _switchScene(IrScene::MainMenu);
+            if (strcmp(_remoteDir, _remoteRoot) != 0) {
+                _goUpRemoteDir();
+            } else {
+                _switchScene(IrScene::MainMenu);
+            }
         }
+    }
+
+    /* Move _remoteDir up one folder level (never above IR_DIR) and
+     * refresh the list in place. */
+    void App09::_goUpRemoteDir()
+    {
+        char* slash = strrchr(_remoteDir, '/');
+        if (slash && slash != _remoteDir) *slash = '\0';
+        if (strlen(_remoteDir) < strlen(_remoteRoot)) {
+            strncpy(_remoteDir, _remoteRoot, sizeof(_remoteDir) - 1);
+            _remoteDir[sizeof(_remoteDir) - 1] = '\0';
+        }
+        _menuSel = 0;
+        _scrollOffset = 0;
+        _enterRemoteList();
     }
 
     /* ════════════════════════════════════════════════════════════
@@ -1667,19 +1734,30 @@ namespace MOONCAKE::APPS
         File root = SD_MMC.open(dir);
         if (!root || !root.isDirectory()) return;
 
+        /* Folders are listed first (sorted), then .ir files (sorted).
+         * A folder entry is marked with a trailing '/' so callers can
+         * tell it apart from a file without a second filesystem lookup. */
+        std::vector<String> dirs;
+        std::vector<String> files;
+
         File file = root.openNextFile();
         while (file) {
-            if (!file.isDirectory()) {
-                String name = file.name();
-                if (name.endsWith(".ir") || name.endsWith(".IR")) {
-                    const char* slash = strrchr(file.name(), '/');
-                    out.push_back(slash ? String(slash + 1) : name);
-                }
+            const char* slash = strrchr(file.name(), '/');
+            String base = slash ? String(slash + 1) : String(file.name());
+            if (file.isDirectory()) {
+                if (base.length() > 0) dirs.push_back(base + "/");
+            } else if (base.endsWith(".ir") || base.endsWith(".IR")) {
+                files.push_back(base);
             }
             file.close();
             file = root.openNextFile();
         }
         root.close();
+
+        std::sort(dirs.begin(), dirs.end());
+        std::sort(files.begin(), files.end());
+        out.insert(out.end(), dirs.begin(), dirs.end());
+        out.insert(out.end(), files.begin(), files.end());
     }
 
 }  /* namespace MOONCAKE::APPS */

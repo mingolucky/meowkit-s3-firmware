@@ -16,6 +16,7 @@
 #include <SD_MMC.h>
 #include <FS.h>
 #include <vector>
+#include <algorithm>
 
 using namespace mooncake;
 
@@ -106,6 +107,7 @@ namespace MOONCAKE::APPS
 
         void _enterRemoteList();
         void _runRemoteList();
+        void _goUpRemoteDir();
 
         void _enterRemoteView();
         void _runRemoteView();
@@ -143,12 +145,12 @@ namespace MOONCAKE::APPS
         int  _menuSel      = 0;
         int  _menuCount    = 0;
         int  _scrollOffset = 0;
-        char _remoteRoot[96] = "/infrared";
-        char _remoteDir[96] = "/infrared";
+        char _remoteRoot[96];
 
         IrSignal  _learnedSig;
         IrRemote  _currentRemote;
         std::vector<String> _fileList;
+        char      _remoteDir[96];   /* current folder being browsed in Saved Remotes, e.g. "/infrared" or "/infrared/tv" */
 
         /* save-name editor */
         char _editBuf[24];
