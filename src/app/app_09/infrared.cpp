@@ -270,9 +270,6 @@ namespace MOONCAKE::APPS
         strncpy(_remoteDir, IR_DIR, sizeof(_remoteDir) - 1);
         _remoteDir[sizeof(_remoteDir) - 1] = '\0';
 
-        strncpy(_remoteDir, IR_DIR, sizeof(_remoteDir) - 1);
-        _remoteDir[sizeof(_remoteDir) - 1] = '\0';
-
         _switchScene(IrScene::MainMenu);
     }
 
