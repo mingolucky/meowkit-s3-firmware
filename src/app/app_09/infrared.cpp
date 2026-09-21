@@ -1162,21 +1162,6 @@ namespace MOONCAKE::APPS
         }
     }
 
-    /* Move _remoteDir up one folder level (never above IR_DIR) and
-     * refresh the list in place. */
-    void App09::_goUpRemoteDir()
-    {
-        char* slash = strrchr(_remoteDir, '/');
-        if (slash && slash != _remoteDir) *slash = '\0';
-        if (strlen(_remoteDir) < strlen(IR_DIR)) {
-            strncpy(_remoteDir, IR_DIR, sizeof(_remoteDir) - 1);
-            _remoteDir[sizeof(_remoteDir) - 1] = '\0';
-        }
-        _menuSel = 0;
-        _scrollOffset = 0;
-        _enterRemoteList();
-    }
-
     void App09::_enterDeleteConfirm()
     {
         _drawHeader("DELETE");
