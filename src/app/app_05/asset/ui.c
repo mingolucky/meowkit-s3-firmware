@@ -21,6 +21,7 @@ lv_obj_t * ui_Image5 = NULL;
 lv_obj_t * ui_RAM = NULL;
 lv_obj_t * ui_gpu_ram = NULL;
 lv_obj_t * ui_mhz = NULL;
+lv_obj_t * ui_mem_symbol = NULL;
 
 void ui_pc_monitor_init(void) {
 	ui_PC_Monitor_screen_init();

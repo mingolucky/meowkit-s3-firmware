@@ -20,21 +20,31 @@ void ui_PC_Monitor_screen_init(void)
 
     ui_temp1 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_temp1, &ui_img_temp1_full_png);
+    /* Découper l'image au lieu de la mettre à l'échelle : c'est ce qui
+     * permet de n'en révéler qu'une fraction, façon jauge. */
+    lv_img_set_size_mode(ui_temp1, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_temp1, LV_SIZE_CONTENT);   /// 100
     lv_obj_set_height(ui_temp1, LV_SIZE_CONTENT);    /// 20
-    lv_obj_set_x(ui_temp1, -85);
+    lv_obj_set_x(ui_temp1, 25);
     lv_obj_set_y(ui_temp1, -10);
-    lv_obj_set_align(ui_temp1, LV_ALIGN_CENTER);
+    /* Ancré à gauche : la barre se vide par la droite quand sa largeur
+     * diminue, au lieu de rétrécir symétriquement. */
+    lv_obj_set_align(ui_temp1, LV_ALIGN_LEFT_MID);
     lv_obj_add_flag(ui_temp1, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_temp1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
     ui_temp2 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_temp2, &ui_img_temp1_full_png);
+    /* Découper l'image au lieu de la mettre à l'échelle : c'est ce qui
+     * permet de n'en révéler qu'une fraction, façon jauge. */
+    lv_img_set_size_mode(ui_temp2, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_temp2, LV_SIZE_CONTENT);   /// 100
     lv_obj_set_height(ui_temp2, LV_SIZE_CONTENT);    /// 20
-    lv_obj_set_x(ui_temp2, -85);
+    lv_obj_set_x(ui_temp2, 25);
     lv_obj_set_y(ui_temp2, -40);
-    lv_obj_set_align(ui_temp2, LV_ALIGN_CENTER);
+    /* Ancré à gauche : la barre se vide par la droite quand sa largeur
+     * diminue, au lieu de rétrécir symétriquement. */
+    lv_obj_set_align(ui_temp2, LV_ALIGN_LEFT_MID);
     lv_obj_add_flag(ui_temp2, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_temp2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
@@ -106,21 +116,31 @@ void ui_PC_Monitor_screen_init(void)
 
     ui_temp3 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_temp3, &ui_img_temp1_full_png);
+    /* Découper l'image au lieu de la mettre à l'échelle : c'est ce qui
+     * permet de n'en révéler qu'une fraction, façon jauge. */
+    lv_img_set_size_mode(ui_temp3, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_temp3, LV_SIZE_CONTENT);   /// 100
     lv_obj_set_height(ui_temp3, LV_SIZE_CONTENT);    /// 20
-    lv_obj_set_x(ui_temp3, 30);
+    lv_obj_set_x(ui_temp3, 140);
     lv_obj_set_y(ui_temp3, 60);
-    lv_obj_set_align(ui_temp3, LV_ALIGN_CENTER);
+    /* Ancré à gauche : la barre se vide par la droite quand sa largeur
+     * diminue, au lieu de rétrécir symétriquement. */
+    lv_obj_set_align(ui_temp3, LV_ALIGN_LEFT_MID);
     lv_obj_add_flag(ui_temp3, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_temp3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
     ui_temp4 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_temp4, &ui_img_temp1_full_png);
+    /* Découper l'image au lieu de la mettre à l'échelle : c'est ce qui
+     * permet de n'en révéler qu'une fraction, façon jauge. */
+    lv_img_set_size_mode(ui_temp4, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_temp4, LV_SIZE_CONTENT);   /// 100
     lv_obj_set_height(ui_temp4, LV_SIZE_CONTENT);    /// 20
-    lv_obj_set_x(ui_temp4, 30);
+    lv_obj_set_x(ui_temp4, 140);
     lv_obj_set_y(ui_temp4, 90);
-    lv_obj_set_align(ui_temp4, LV_ALIGN_CENTER);
+    /* Ancré à gauche : la barre se vide par la droite quand sa largeur
+     * diminue, au lieu de rétrécir symétriquement. */
+    lv_obj_set_align(ui_temp4, LV_ALIGN_LEFT_MID);
     lv_obj_add_flag(ui_temp4, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_temp4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
@@ -168,13 +188,31 @@ void ui_PC_Monitor_screen_init(void)
     lv_obj_set_style_text_opa(ui_symbol_4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_symbol_4, &ui_font_name_14, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    /* Le « % » est un libellé distinct, petit et blanc, exactement comme
+     * ui_symbol_2 et ui_symbol_4 le font pour les charges CPU et GPU. */
+    ui_mem_symbol = lv_label_create(ui_PC_Monitor);
+    lv_obj_set_width(ui_mem_symbol, LV_SIZE_CONTENT);
+    lv_obj_set_height(ui_mem_symbol, LV_SIZE_CONTENT);
+    lv_obj_set_x(ui_mem_symbol, 143);
+    lv_obj_set_y(ui_mem_symbol, -15);
+    lv_obj_set_align(ui_mem_symbol, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_mem_symbol, "%");
+    lv_obj_set_style_text_color(ui_mem_symbol, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(ui_mem_symbol, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_mem_symbol, &ui_font_name_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+
     ui_Image5 = lv_img_create(ui_PC_Monitor);
     lv_img_set_src(ui_Image5, &ui_img_temp2_full_png);
+    /* Découpage plutôt que mise à l'échelle, comme les barres horizontales. */
+    lv_img_set_size_mode(ui_Image5, LV_IMG_SIZE_MODE_REAL);
     lv_obj_set_width(ui_Image5, LV_SIZE_CONTENT);   /// 40
     lv_obj_set_height(ui_Image5, LV_SIZE_CONTENT);    /// 50
-    lv_obj_set_x(ui_Image5, 60);
-    lv_obj_set_y(ui_Image5, -25);
-    lv_obj_set_align(ui_Image5, LV_ALIGN_CENTER);
+    lv_obj_set_x(ui_Image5, 200);
+    lv_obj_set_y(ui_Image5, -120);
+    /* Ancré en bas : le dégradé va du rouge en haut au vert en bas, la jauge
+     * se remplit donc vers le haut. Bord bas conservé à y=120 (centre parent
+     * 120, y=-25, hauteur 50). */
+    lv_obj_set_align(ui_Image5, LV_ALIGN_BOTTOM_LEFT);
     lv_obj_add_flag(ui_Image5, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_Image5, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
@@ -207,10 +245,63 @@ void ui_PC_Monitor_screen_init(void)
     lv_obj_set_y(ui_mhz, -20);
     lv_obj_set_align(ui_mhz, LV_ALIGN_CENTER);
     lv_label_set_text(ui_mhz, "800Mhz");
-    lv_obj_set_style_text_color(ui_mhz, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(ui_mhz, lv_color_hex(0xA3DE00), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_mhz, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_mhz, &ui_font_name_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_mhz, &ui_font_pc_temp, LV_PART_MAIN | LV_STATE_DEFAULT);
 
 
 }
 
+
+/* ── Jauges ───────────────────────────────────────────────────────────
+ * Les cinq barres dégradées de cet écran étaient créées puis jamais
+ * touchées : elles affichaient le dégradé complet quel que soit l'état de
+ * la machine. Les quatre horizontales sont désormais pilotées.
+ * (ui_Image5, la barre verticale du bloc mémoire, est laissée telle quelle :
+ * son sens de remplissage et son ancrage demandent une décision de design.)
+ */
+#define GAUGE_W        100
+#define GAUGE_V_H       50   /* hauteur de la barre verticale (ui_Image5) */
+#define GAUGE_TEMP_MIN  30   /* °C — en dessous, barre vide */
+#define GAUGE_TEMP_MAX  90   /* °C — au-dessus, barre pleine */
+
+static void gauge_set(lv_obj_t * bar, int pct)
+{
+    if (!bar) return;
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    lv_obj_set_width(bar, (GAUGE_W * pct) / 100);
+}
+
+static int gauge_temp_pct(int celsius)
+{
+    if (celsius <= GAUGE_TEMP_MIN) return 0;
+    if (celsius >= GAUGE_TEMP_MAX) return 100;
+    return ((celsius - GAUGE_TEMP_MIN) * 100) / (GAUGE_TEMP_MAX - GAUGE_TEMP_MIN);
+}
+
+/* Barre verticale : remplissage par le bas. Le mode REAL montre le haut de
+ * l'image ; on décale le contenu pour révéler sa partie basse, la verte. */
+static void gauge_set_vertical(lv_obj_t * bar, int pct)
+{
+    if (!bar) return;
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    int h = (GAUGE_V_H * pct) / 100;
+    lv_obj_set_height(bar, h);
+    lv_img_set_offset_y(bar, -(GAUGE_V_H - h));
+}
+
+void ui_pc_monitor_set_memory_gauge(int used_pct)
+{
+    gauge_set_vertical(ui_Image5, used_pct);
+}
+
+void ui_pc_monitor_set_gauges(int cpu_temp_c, int cpu_load_pct,
+                              int gpu_temp_c, int gpu_load_pct)
+{
+    gauge_set(ui_temp2, gauge_temp_pct(cpu_temp_c));   /* température CPU */
+    gauge_set(ui_temp1, cpu_load_pct);                 /* charge CPU      */
+    gauge_set(ui_temp3, gauge_temp_pct(gpu_temp_c));   /* température GPU */
+    gauge_set(ui_temp4, gpu_load_pct);                 /* charge GPU      */
+}

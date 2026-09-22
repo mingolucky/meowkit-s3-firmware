@@ -35,6 +35,11 @@ LV_IMG_DECLARE(ui_img_temp2_full_png);    // assets/temp2_full.png
 
 // SCREEN: ui_PC_Monitor
 void ui_PC_Monitor_screen_init(void);
+/* Pilote les quatre jauges horizontales. Températures en °C, charges en %. */
+void ui_pc_monitor_set_gauges(int cpu_temp_c, int cpu_load_pct,
+                              int gpu_temp_c, int gpu_load_pct);
+/* Barre verticale du bloc « USED MEMORY ». Occupation en %. */
+void ui_pc_monitor_set_memory_gauge(int used_pct);
 void ui_pc_monitor_init(void); // optional helper to init and load screen
 
 // Widgets
@@ -58,6 +63,7 @@ extern lv_obj_t * ui_Image5;
 extern lv_obj_t * ui_RAM;
 extern lv_obj_t * ui_gpu_ram;
 extern lv_obj_t * ui_mhz;
+extern lv_obj_t * ui_mem_symbol;
 
 #ifdef __cplusplus
 }
