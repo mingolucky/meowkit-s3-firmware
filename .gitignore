@@ -15,4 +15,5 @@ Thumbs.db
 
 # Local release artifacts
 dist/
+output/
 upload-log.txt
