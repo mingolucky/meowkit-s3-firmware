@@ -1,0 +1,59 @@
+{
+    "example_output": [
+        {
+            "name": "extension_test",
+            "path": "../build/example/extension_test",
+            "expected_output": [
+                ">> install app",
+                "[app] on construct",
+                ">> install extensions",
+                "[worker] on construct",
+                "[ui] on construct",
+                ">> update mooncake",
+                "[worker] on running",
+                "[ui] on foreground",
+                "[app] on running",
+                "[worker] on running",
+                "[ui] on foreground",
+                "[app] on running",
+                "[worker] on running",
+                "[ui] on foreground",
+                ">> test over",
+                "[worker] on deconstruct",
+                "[ui] on deconstruct",
+                "[app] on deconstruct"
+            ]
+        },
+        {
+            "name": "ability_manager_test",
+            "path": "../build/example/ability_manager_test",
+            "expected_output": [
+                ">> create ability",
+                "[basic] on construct",
+                ">> update ability for 3 times",
+                "[basic] on create",
+                "[basic] on running",
+                "[basic] on running",
+                "[basic] on running",
+                ">> destroy basic ability",
+                "[basic] on ondestory",
+                "[basic] on deconstruct",
+                ">> test over",
+                "[basic] on construct",
+                "[basic] on deconstruct"
+            ]
+        },
+        {
+            "name": "basic_demo",
+            "path": "../build/example/basic_demo",
+            "expected_output": [
+                ">> install app",
+                "[凤爪] on construct",
+                ">> update mooncake",
+                "[凤爪] on open",
+                "[凤爪] on running",
+                "[凤爪] on running"
+            ]
+        }
+    ]
+}

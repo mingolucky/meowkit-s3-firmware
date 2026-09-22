@@ -1,0 +1,29 @@
+{
+  "name": "Mooncake",
+  "version": "2.0.0",
+  "description": "适用于单片机的多 App 生命周期调度器. Light weight multiple apps' life cycle dispatcher.",
+  "keywords": "app, launcher, life cycle, dispatcher",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Forairaaaaa/mooncake.git"
+  },
+  "authors": [
+    {
+      "name": "Forairaaaaa",
+      "email": "applesyqd@outlook.com",
+      "url": "https://github.com/Forairaaaaa"
+    }
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/Forairaaaaa/mooncake",
+  "dependencies": {},
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "./src",
+    "flags": [
+      "-std=c++17"
+    ]
+  }
+}

@@ -26,11 +26,7 @@ docs/advanced-settings
 
 Before editing, confirm the tree is clean and update the branch from `origin/main`. Never overwrite another contributor's uncommitted work.
 
-Initialize the pinned library dependencies after a fresh clone:
-
-```powershell
-git submodule update --init --recursive
-```
+The required library sources are vendored under `lib/`. A normal clone contains everything needed to build; no submodule initialization is required.
 
 ## 3. Implement the firmware change
 
