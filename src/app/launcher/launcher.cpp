@@ -384,6 +384,16 @@ void Launcher::onLoop()
                           _running_app_id);
 
             /* 1. Request close (sets state → StateGoClose) */
+            /* An LVGL app owns its root screen. Its onClose() may delete
+             * it, so make the persistent menu active before cleanup.
+             * Deleting the active LVGL root screen can corrupt LVGL state
+             * and trigger a watchdog reset. */
+            if (ui_apps_menu && lv_scr_act() != ui_apps_menu) {
+                lv_disp_load_scr(ui_apps_menu);
+                lv_obj_invalidate(ui_apps_menu);
+                lv_timer_handler();
+            }
+
             _mooncake.closeApp(_running_app_id);
             /* 2. Drive state machine so onClose() actually executes */
             _mooncake.update();

@@ -9,7 +9,6 @@
  */
 #include "ble_spam.h"
 #include "../app_common/hp_ui.h"
-#include <SD_MMC.h>
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
@@ -27,14 +26,12 @@ static constexpr int ITEM_H       = hp::ITEM2_H;         // 34 (2-line item)
 static constexpr int MENU_Y0      = hp::CON_Y0 + 2;      // 20
 static constexpr int MENU_VISIBLE = hp::LIST2_VIS;       // 5
 
-/* Running-page status panel geometry (overlay on top of attacking.png) */
+/* Running-page status panel inside the shared TUI frame. */
 static constexpr int RUN_PANEL_X = 6;
-static constexpr int RUN_PANEL_Y = 150;
+static constexpr int RUN_PANEL_Y = 90;
 static constexpr int RUN_PANEL_W = hp::W - 12;
-static constexpr int RUN_PANEL_H = 56;
+static constexpr int RUN_PANEL_H = 64;
 
-/* SD path of the running-page background image */
-static const char* BS_BG_PATH = "/assets/ble_attacking.png";
 
 /* ════════════════════════════════════════════════════════════════
  *  Apple Continuity — Proximity Pair models
@@ -225,6 +222,8 @@ void App07::onOpen()
     _packetCount = 0;
     _menuSel = 0;
     _scrollOffset = 0;
+    _bHeld = (_device->button.B.read() == Button_Class::PRESSED);
+    _bBackPending = false;
     _ledActive = false;
     _device->led.off();
     _switchPage(BsPage::MainMenu);
@@ -235,10 +234,36 @@ void App07::onRunning()
     _device->button.update();
     _device->button.tick();
 
-    /* Long-press B from anywhere = exit app (releases BT controller in onClose) */
+    /* Launcher owns long-B exit and calls onClose before returning to UI.
+     * Do not close independently here: Launcher must update its app state. */
     if (_device->button.B.isLongPress()) {
         _stopSpam();
-        close();
+        _bBackPending = false;
+        return;
+    }
+
+    const bool bDown = (_device->button.B.state() == Button_Class::PRESSED);
+    if (bDown && !_bHeld) {
+        _bBackPending = (_page == BsPage::Running);
+        _stopSpam();  // Stop immediately, even before the hold threshold.
+        if (_page == BsPage::Running) {
+            _drawRunningStatic();
+            _drawRunningStatus();
+        }
+    }
+    if (!bDown && _bHeld) {
+        if (_bBackPending) _switchPage(BsPage::MainMenu);
+        _bBackPending = false;
+        _device->button.B.hasChanged();
+    }
+    _bHeld = bDown;
+    if (bDown) {
+        // Ignore simultaneous inputs while the user is stopping/exiting.
+        _device->button.A.hasChanged();
+        _device->button.Up.hasChanged();
+        _device->button.Down.hasChanged();
+        _device->button.Left.hasChanged();
+        _device->button.Right.hasChanged();
         return;
     }
 
@@ -264,7 +289,8 @@ void App07::onClose()
     _stopSpam();
     _deinitBLE();
     _setLedActive(false);
-    _freeRunningBg();
+    _bHeld = false;
+    _bBackPending = false;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -336,7 +362,7 @@ void App07::_enterMainMenu()
         _scrollOffset = std::max(0, _menuCount - MENU_VISIBLE);
 
     _drawHeader("BLE Spam");
-    _drawFooter3("[^v]Select", "[A]Enter", "[B]Exit");
+    _drawFooter3("[^v]Select", "[A]Enter", "Hold B:Exit");
 
     int end = std::min(_menuCount - _scrollOffset, MENU_VISIBLE);
     for (int i = 0; i < end; i++) {
@@ -383,70 +409,12 @@ void App07::_runMainMenu()
         _attackIdx = _menuSel + _scrollOffset;
         _switchPage(BsPage::Running);   /* Enter running page idle; press A to start */
     }
-    if (_device->button.B.pressed()) {
-        close();
-    }
+    /* Short B stays at the top-level menu. Hold B exits via Launcher. */
 }
 
 /* ══════════════════════════════════════════════════════════════
  *  Running page — live status (TUI style)
  * ══════════════════════════════════════════════════════════════ */
-/* ════════════════════════════════════════════════════════════
- *  Running page — attacking.png background + status panel overlay
- * ═══════════════════════════════════════════════════════════ */
-
-/* Load file from SD into PSRAM buffer; caller frees(). nullptr on error. */
-static uint8_t* _bsLoadSdFile(const char* path, size_t& outLen)
-{
-    outLen = 0;
-    File f = SD_MMC.open(path, FILE_READ);
-    if (!f) { Serial.printf("[App07] open failed: %s\n", path); return nullptr; }
-    size_t sz = f.size();
-    uint8_t* buf = (uint8_t*)ps_malloc(sz);
-    if (!buf) { f.close(); Serial.println("[App07] ps_malloc failed"); return nullptr; }
-    size_t got = f.read(buf, sz);
-    f.close();
-    if (got != sz) { free(buf); Serial.println("[App07] short read"); return nullptr; }
-    outLen = sz;
-    return buf;
-}
-
-void App07::_loadRunningBg()
-{
-    if (_bgLoaded) return;
-    auto& Lcd = _device->Lcd;
-    if (!_bgRunning) {
-        _bgRunning = new LGFX_Sprite(&Lcd);
-        _bgRunning->setPsram(true);
-        _bgRunning->setColorDepth(16);
-        if (!_bgRunning->createSprite(SCR_W, SCR_H)) {
-            Serial.println("[App07] bg sprite alloc failed");
-            delete _bgRunning; _bgRunning = nullptr;
-            return;
-        }
-    }
-    _bgRunning->fillSprite(BS_BG);
-    size_t len = 0;
-    uint8_t* buf = _bsLoadSdFile(BS_BG_PATH, len);
-    if (buf) {
-        /* Decode once into the cached PSRAM sprite via shared UI helper. */
-        hp::drawPng(*_bgRunning, 0, 0, buf, len);
-        free(buf);
-        _bgLoaded = true;
-    } else {
-        Serial.printf("[App07] bg image missing: %s\n", BS_BG_PATH);
-    }
-}
-
-void App07::_freeRunningBg()
-{
-    if (_bgRunning) {
-        _bgRunning->deleteSprite();
-        delete _bgRunning;
-        _bgRunning = nullptr;
-    }
-    _bgLoaded = false;
-}
 
 void App07::_setLedActive(bool on)
 {
@@ -463,34 +431,21 @@ void App07::_setLedActive(bool on)
 void App07::_enterRunning()
 {
     _lastDrawTime = 0;
-    _loadRunningBg();
     _drawRunningStatic();
     _drawRunningStatus();
 }
 
-/* Paint the static parts of the running page once.  The attacking.png fills
- * the entire 320×240 screen as background; only the small status overlay
- * panel and a single-line footer text strip sit on top — no black bars. */
+/* Draw the shared TUI frame without SD assets or a background sprite. */
 void App07::_drawRunningStatic()
 {
     auto& Lcd = _device->Lcd;
-
-    /* Full-screen background image (cached PSRAM sprite). */
-    if (_bgLoaded && _bgRunning) {
-        _bgRunning->pushSprite(0, 0);
-    } else {
-        Lcd.fillScreen(BS_BG);
-    }
-
-    /* Status panel frame (black fill so text is readable over image) */
-    Lcd.fillRect(RUN_PANEL_X, RUN_PANEL_Y, RUN_PANEL_W, RUN_PANEL_H, BS_BG);
+    hp::drawChrome(Lcd);
+    hp::drawHeader(Lcd, "BLE Spam");
+    Lcd.setFont(&fonts::efontCN_16);
+    Lcd.setTextColor(BS_FG_DIM, BS_BG);
+    Lcd.setCursor(hp::PAD_X, 40);
+    Lcd.print("B: stop and back. Hold B: exit.");
     Lcd.drawRect(RUN_PANEL_X, RUN_PANEL_Y, RUN_PANEL_W, RUN_PANEL_H, BS_FG);
-
-    /* Footer hints — small black strip just behind the text, full image
-     * elsewhere remains untouched. */
-    int ftrY = SCR_H - 18;
-    Lcd.fillRect(0, ftrY, SCR_W, 18, BS_BG);
-    Lcd.drawFastHLine(0, ftrY, SCR_W, BS_FG);
     _drawFooter3("[^v]Speed", _advertising ? "[A]Stop" : "[A]Start", "[B]Back");
 }
 
@@ -499,17 +454,10 @@ void App07::_drawRunningStatus()
 {
     auto& Lcd = _device->Lcd;
 
-    /* Title + state pill drawn directly over the image (no header bar). */
-    const char* stStr = _advertising ? "ACTIVE" : " IDLE ";
-    uint16_t    stCol = _advertising ? BS_ACCENT : BS_FG_DIM;
-    int bw = 6 * 8 + 10;
-    int bx = SCR_W - bw - 6;
-    Lcd.fillRect(bx, 4, bw, 18, BS_BG);
-    Lcd.drawRect(bx, 4, bw, 18, stCol);
-    Lcd.setFont(&fonts::efontCN_16);
-    Lcd.setTextColor(stCol, BS_BG);
-    Lcd.setCursor(bx + 5, 6);
-    Lcd.print(stStr);
+    /* Status badge uses the same header as the menu. */
+    const char* stStr = _advertising ? "ACTIVE" : "IDLE";
+    uint16_t stCol = _advertising ? BS_ACCENT : BS_FG_DIM;
+    hp::drawHeader(Lcd, "BLE Spam", stStr, stCol);
 
     /* Clear interior of status panel (keep border) */
     Lcd.fillRect(RUN_PANEL_X + 1, RUN_PANEL_Y + 1,
@@ -540,12 +488,7 @@ void App07::_drawRunningStatus()
 
 void App07::_updateRunning()
 {
-    /* Short B = stop and return to main menu (long B already handled above) */
-    if (_device->button.B.pressed()) {
-        _stopSpam();
-        _switchPage(BsPage::MainMenu);
-        return;
-    }
+    /* B press/release is handled centrally in onRunning(). */
 
     /* A = toggle broadcast on/off (stay on running page) */
     if (_device->button.A.pressed()) {

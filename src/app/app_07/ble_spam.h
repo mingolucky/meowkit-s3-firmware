@@ -82,11 +82,9 @@ private:
     void _drawRunningStatus();
     void _updateRunning();
 
-    /* ── Running-page background image (attacking.png on SD) ── */
-    LGFX_Sprite* _bgRunning = nullptr;
-    bool         _bgLoaded  = false;
-    void         _loadRunningBg();
-    void         _freeRunningBg();
+    /* B stops immediately; release returns, hold exits via Launcher. */
+    bool _bHeld = false;
+    bool _bBackPending = false;
 
     /* ── LED feedback (white blink while broadcasting) ── */
     bool _ledActive = false;
