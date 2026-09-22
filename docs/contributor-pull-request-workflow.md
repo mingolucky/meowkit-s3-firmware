@@ -26,6 +26,12 @@ docs/advanced-settings
 
 Before editing, confirm the tree is clean and update the branch from `origin/main`. Never overwrite another contributor's uncommitted work.
 
+Initialize the pinned library dependencies after a fresh clone:
+
+```powershell
+git submodule update --init --recursive
+```
+
 ## 3. Implement the firmware change
 
 Follow the existing architecture and product interaction model.
