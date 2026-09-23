@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include "../../system/system_sound.h"
 
 namespace MOONCAKE::APPS
 {
@@ -97,6 +98,10 @@ float App03::_calcAmplitude(const int16_t* buf, size_t mono)
  * ══════════════════════════════════════════════════════════════════ */
 void App03::onOpen()
 {
+    /* ES7210 RX and ES8311 TX share MCLK/BCLK/WS pins. Give app03 exclusive
+     * ownership before I2S1 changes the GPIO matrix. */
+    system_sound_suspend();
+
     // If a previous crash left the I2S driver installed, uninstall it now.
     // esp_err_t is ignored — the call is a no-op when the driver is absent.
     i2s_driver_uninstall(I2S_NUM_1);
@@ -264,6 +269,10 @@ void App03::onClose()
 
     _initState = InitState::Idle;
     _device->Lcd.fillScreen(TFT_BLACK);
+
+    /* I2S1 is fully released; restore ES8311/I2S0 and reclaim shared pins. */
+    if (!system_sound_resume())
+        Serial.println("[VU] Failed to restore system audio");
 }
 
 /* ══════════════════════════════════════════════════════════════════

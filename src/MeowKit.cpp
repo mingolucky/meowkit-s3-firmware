@@ -4,6 +4,9 @@
  */
 #include "MeowKit.h"
 #include "splash/splash_screen.h"
+#include "system/settings_bridge.h"
+#include "system/system_sound.h"
+#include "system/system_sound_assets.h"
 
 bool MeowKit::Setup()
 {
@@ -14,7 +17,13 @@ bool MeowKit::Setup()
     }
 
     _device->init();
+    settings_init();
+    sys_settings_bridge_attach(_device.get());
+    system_sound_init(_device.get());
+    settings_load_all();
+    system_sound_play_boot(boot_animation_duration_ms);
     SplashScreen::show(_device->Lcd);
+    system_sound_stop();
 
     _launcher = std::make_unique<Launcher>(_device.get());
     _launcher->onCreate();

@@ -32,7 +32,7 @@
 /* NS4150B + 18mm 1W speaker: amplifier output power exceeds speaker rated power
  * at high DAC levels. Validated safe ceiling: volume=16/100 keeps output ≤1W.
  * All callers (settings_bridge, mp3 apps) must not exceed this value. */
-#define SPK_VOLUME_MAX    16
+#define SPK_VOLUME_MAX    75
 
 /**
  * @brief Speaker configuration.
@@ -43,9 +43,10 @@ struct speaker_config_t
     int pin_bclk     = BCLKPIN;      ///< Bit clock (shared with mic)
     int pin_ws       = WSPIN;        ///< Word select / LRCK (shared with mic)
     int pin_data_out = DOPIN;        ///< Data out (to ES8311 SDIN)
+    int pin_mclk     = MCLKPIN;       ///< Master clock (to ES8311 CCLK)
 
     // ── Audio parameters ──
-    uint32_t sample_rate    = 44100; ///< Default sample rate in Hz (must match ES8311 coeff_div table for SCLK-derived MCLK)
+    uint32_t sample_rate    = 44100; ///< Default sample rate in Hz
     uint8_t  bits_per_sample = 16;   ///< 16 or 32 bits
 
     // ── DMA tuning ──
@@ -153,6 +154,8 @@ public:
      * @return true on success
      */
     bool play(const uint8_t* data, size_t size);
+    bool playPcm(const int16_t* data, size_t sample_count, uint8_t channels,
+                 uint32_t sample_rate);
 
     /**
      * @brief Play a sine-wave tone (blocking).

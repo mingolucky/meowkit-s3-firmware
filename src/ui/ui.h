@@ -72,12 +72,6 @@ LV_IMG_DECLARE(ui_img_app_06_png);    // assets/app_06.png
 LV_IMG_DECLARE(ui_img_app_07_png);    // assets/app_07.png  (placeholder — replace with SquareLine export)
 LV_IMG_DECLARE(ui_img_app_08_png);    // assets/app_08.png
 LV_IMG_DECLARE(ui_img_app_09_png);    // assets/app_09.png
-LV_IMG_DECLARE(ui_img_app_10_png);    // assets/app_10.png
-LV_IMG_DECLARE(ui_img_app_11_png);    // assets/app_11.png
-LV_IMG_DECLARE(ui_img_app_12_png);    // assets/app_12.png
-LV_IMG_DECLARE(ui_img_app_13_png);    // assets/app_13.png
-LV_IMG_DECLARE(ui_img_app_14_png);    // assets/app_14.png
-LV_IMG_DECLARE(ui_img_app_15_png);    // assets/app_15.png
 LV_IMG_DECLARE(ui_img_pcmontior_png);      // assets/pcmontior.png
 /* ── Semantic app icons (SquareLine Studio export) ── */
 LV_IMG_DECLARE(ui_img_dino_png);           // App 01 Dino Game

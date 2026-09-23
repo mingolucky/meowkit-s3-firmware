@@ -15,6 +15,7 @@
  * ═══════════════════════════════════════════════════════════════ */
 #define BSP_VERSION                 "v1.0"
 #define PROJECT_NAME                "MeowKit"
+#define FIRMWARE_VERSION            "v1.0.1"
 
 /* ═══════════════════════════════════════════════════════════════
  *  Hardware Board Test (BBT) — set 1 to enable, 0 to disable

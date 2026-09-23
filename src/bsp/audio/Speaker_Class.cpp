@@ -42,8 +42,8 @@ bool Speaker_Class::_init_codec(uint32_t sample_rate)
     es8311_clock_config_t es_clk = {
         .mclk_inverted      = false,
         .sclk_inverted      = false,
-        .mclk_from_mclk_pin = false,
-        .mclk_frequency     = 0,
+        .mclk_from_mclk_pin = true,
+        .mclk_frequency     = (int)(sample_rate * 128U),
         .sample_frequency   = (int)sample_rate,
     };
 
@@ -84,9 +84,9 @@ bool Speaker_Class::_init_i2s()
     i2s_cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
     i2s_cfg.dma_buf_count        = _cfg.dma_buf_count;
     i2s_cfg.dma_buf_len          = _cfg.dma_buf_len;
-    i2s_cfg.use_apll             = false;
+    i2s_cfg.use_apll             = true;
     i2s_cfg.tx_desc_auto_clear   = true;   // Auto-clear DMA on underflow (silence)
-    i2s_cfg.fixed_mclk           = 0;
+    i2s_cfg.fixed_mclk           = _cfg.sample_rate * 128U;
 
     esp_err_t err = i2s_driver_install(_cfg.i2s_port, &i2s_cfg, 0, NULL);
     if (err != ESP_OK) {
@@ -95,7 +95,7 @@ bool Speaker_Class::_init_i2s()
     }
 
     i2s_pin_config_t pin_cfg = {};
-    pin_cfg.mck_io_num   = -1;             // No dedicated MCLK for speaker path
+    pin_cfg.mck_io_num   = _cfg.pin_mclk;
     pin_cfg.bck_io_num   = _cfg.pin_bclk;
     pin_cfg.ws_io_num    = _cfg.pin_ws;
     pin_cfg.data_out_num = _cfg.pin_data_out;
@@ -112,9 +112,9 @@ bool Speaker_Class::_init_i2s()
     i2s_start(_cfg.i2s_port);
     _i2s_installed = true;
 
-    ESP_LOGI(TAG, "I2S%d TX configured: rate=%lu, DOUT=%d, BCLK=%d, WS=%d",
+    ESP_LOGI(TAG, "I2S%d TX configured: rate=%lu, DOUT=%d, BCLK=%d, WS=%d, MCLK=%d",
              _cfg.i2s_port, _cfg.sample_rate,
-             _cfg.pin_data_out, _cfg.pin_bclk, _cfg.pin_ws);
+             _cfg.pin_data_out, _cfg.pin_bclk, _cfg.pin_ws, _cfg.pin_mclk);
     return true;
 }
 
@@ -142,6 +142,9 @@ bool Speaker_Class::begin(I2C_Class* i2c)
 
     // Init I2S TX
     if (!_init_i2s()) {
+        es8311_voice_mute(_es_handle, true);
+        es8311_delete(_es_handle);
+        _es_handle = nullptr;
         return false;
     }
 
@@ -290,6 +293,34 @@ bool Speaker_Class::play(const uint8_t* data, size_t size)
     return true;
 }
 
+bool Speaker_Class::playPcm(const int16_t* data, size_t sample_count,
+                            uint8_t channels, uint32_t sample_rate)
+{
+    if (!_initialized || !data || !sample_count ||
+        (channels != 1 && channels != 2)) return false;
+    if (sample_rate != _cfg.sample_rate && !setSampleRate(sample_rate)) return false;
+    _is_playing = true;
+    bool ok = true;
+    if (channels == 2) {
+        ok = _i2s_write(data, sample_count * sizeof(int16_t));
+    } else {
+        const size_t chunk = _cfg.dma_buf_len;
+        int16_t stereo[chunk * 2];
+        for (size_t off = 0; off < sample_count && _is_playing;) {
+            size_t count = sample_count - off;
+            if (count > chunk) count = chunk;
+            for (size_t i = 0; i < count; ++i)
+                stereo[i * 2] = stereo[i * 2 + 1] = data[off + i];
+            if (!_i2s_write(stereo, count * 2 * sizeof(int16_t))) {
+                ok = false; break;
+            }
+            off += count;
+        }
+    }
+    _is_playing = false;
+    return ok;
+}
+
 void Speaker_Class::tone(uint32_t freq_hz, uint32_t duration_ms, int volume)
 {
     if (!_initialized) return;
@@ -350,24 +381,27 @@ void Speaker_Class::stop()
 bool Speaker_Class::setSampleRate(uint32_t rate)
 {
     if (!_initialized) return false;
+    if (!rate || rate == _cfg.sample_rate) return true;
 
-    // Reconfigure I2S clock
-    esp_err_t err = i2s_set_sample_rates(_cfg.i2s_port, rate);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "i2s_set_sample_rates failed: %s", esp_err_to_name(err));
+    /* fixed_mclk belongs to the installed I2S configuration. Reinstall it so
+     * switching between the 44.1 kHz boot sound and 48 kHz button sound also
+     * updates MCLK, not only WS/BCLK. */
+    const uint32_t old_rate = _cfg.sample_rate;
+    _cfg.sample_rate = rate;
+    if (!_init_i2s()) {
+        _cfg.sample_rate = old_rate;
+        _init_i2s();
+        ESP_LOGE(TAG, "I2S sample-rate reconfiguration failed");
         return false;
     }
 
-    // Reconfigure ES8311 clock dividers
-    // ES8311 in SCLK-derived mode: mclk = sample_rate * bits * 2
-    int mclk = rate * _cfg.bits_per_sample * 2;
-    err = es8311_sample_frequency_config(_es_handle, mclk, rate);
+    int mclk = rate * 128U;
+    esp_err_t err = es8311_sample_frequency_config(_es_handle, mclk, rate);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "es8311_sample_frequency_config failed: %s", esp_err_to_name(err));
         return false;
     }
 
-    _cfg.sample_rate = rate;
     ESP_LOGI(TAG, "Sample rate => %lu Hz", rate);
     return true;
 }

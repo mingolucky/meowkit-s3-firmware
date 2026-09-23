@@ -56,6 +56,7 @@
 #include "../../system/settings_bridge.h"  /* includes persist internally */
 #include "../../system/power_mgmt.h"
 #include "../../system/mk_events.h"
+#include "../../system/system_sound.h"
 #include <Arduino.h>
 #include <SD_MMC.h>
 #include <lvgl.h>
@@ -67,6 +68,22 @@
 
 /* Held for shutdown LED callback — plain C function can't capture 'this'. */
 static DEVICES* s_shutdown_dev = nullptr;
+
+static void _update_system_key_sound(DEVICES* dev)
+{
+    enum : uint8_t { A = 1u << 0, B = 1u << 1, U = 1u << 2,
+                     D = 1u << 3, L = 1u << 4, R = 1u << 5 };
+    static uint8_t previous = 0;
+    uint8_t current = 0;
+    if (dev->button.A.state() == Button_Class::PRESSED) current |= A;
+    if (dev->button.B.state() == Button_Class::PRESSED) current |= B;
+    if (dev->button.Up.state() == Button_Class::PRESSED) current |= U;
+    if (dev->button.Down.state() == Button_Class::PRESSED) current |= D;
+    if (dev->button.Left.state() == Button_Class::PRESSED) current |= L;
+    if (dev->button.Right.state() == Button_Class::PRESSED) current |= R;
+    if (current & (uint8_t)~previous) system_sound_play_button();
+    previous = current;
+}
 
 /* True when the backlight has been turned off due to idle timeout. */
 static bool s_screen_off = false;
@@ -235,8 +252,6 @@ void Launcher::onCreate()
                   (unsigned long)ESP.getFreePsram());
 
     /* NVS init — wrapped in settings layer so we don't expose persist.h here */
-    settings_init();
-
     /* Event bus — must be ready before any button/power event can be pushed */
     mk_events_init();
 
@@ -303,6 +318,7 @@ void Launcher::onLoop()
 
         /* Poll physical buttons every loop so press edges aren't missed. */
         _device->button.update();
+        _update_system_key_sound(_device);
         _device->button.tick();
         handlePhysicalNav();
 
@@ -376,6 +392,7 @@ void Launcher::onLoop()
         /* Keep sleep timer alive while an app is open — user is actively using device. */
         power_reset_sleep_timer();
         _device->button.update(); /* read GPIO (apps use LVGL indev instead) */
+        _update_system_key_sound(_device);
         _device->button.tick();   /* must tick for long-press B detection */
 
         /* Long-press B → exit app, return to persistent UI */
@@ -482,12 +499,6 @@ void Launcher::buildUI()
     /* WiFi bridge: STA mode + auto-reconnect of last credentials.
      * Safe to call once here; ui_wifi screen uses it for scan/connect. */
     ui_wifi_bridge_init();
-
-    /* Persisted settings: load all saved values from NVS and apply to
-     * hardware so the device boots into the same state the user last left.
-     * Bridge must be attached before settings_load_all() is called. */
-    sys_settings_bridge_attach(_device);
-    settings_load_all();
 
     /* Populate menu grid */
     loadAppsMenu();

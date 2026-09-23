@@ -9,10 +9,12 @@
 #include "../../system/usb_msc.h"
 #include "../../system/usb_manager.h"
 #include "../../system/settings_bridge.h"
+#include "../../bsp/config.h"
 
 static lv_obj_t   * s_wifi_lbl          = NULL;
 static lv_obj_t   * s_wifi_dot          = NULL;
 static lv_timer_t * s_wifi_lbl_timer    = NULL;
+static lv_obj_t   * s_info_dialog       = NULL;
 
 lv_obj_t * ui_settings;
 lv_obj_t * ui_settings_bg;
@@ -62,6 +64,48 @@ static void ui_event_msc_button_click(lv_event_t * e)
     if(ui_usb_msc_label) {
         lv_label_set_text(ui_usb_msc_label, ok ? "connected - copy files" : "MSC init failed");
     }
+}
+
+static void _settings_button_press_style(lv_obj_t * button)
+{
+    /* A short physical response without replacing the original icon artwork. */
+    lv_obj_set_style_transform_zoom(button, 238, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_translate_y(button, 2, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_img_recolor(button, lv_color_hex(0xBEE700),
+                                 LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_img_recolor_opa(button, LV_OPA_30,
+                                     LV_PART_MAIN | LV_STATE_PRESSED);
+}
+
+static void _info_dialog_event(lv_event_t * e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+    lv_obj_t * dialog = lv_event_get_current_target(e);
+    s_info_dialog = NULL;
+    lv_msgbox_close(dialog);
+}
+
+static void ui_event_info_button_click(lv_event_t * e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_CLICKED || s_info_dialog) return;
+
+    static const char * buttons[] = {"OK", ""};
+    s_info_dialog = lv_msgbox_create(lv_scr_act(),
+                                     "About MeowKit",
+                                     "Firmware " FIRMWARE_VERSION "\nAuthor: Mingo",
+                                     buttons, false);
+    lv_obj_set_width(s_info_dialog, 250);
+    lv_obj_set_style_bg_color(s_info_dialog, lv_color_hex(0x171717),
+                              LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(s_info_dialog, lv_color_hex(0xBEE700),
+                                  LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(s_info_dialog, 2,
+                                  LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(s_info_dialog, lv_color_white(),
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_center(s_info_dialog);
+    lv_obj_add_event_cb(s_info_dialog, _info_dialog_event,
+                        LV_EVENT_VALUE_CHANGED, NULL);
 }
 
 // ── NVS persist callbacks ─────────────────────────────────────────────────
@@ -295,6 +339,10 @@ void ui_settings_screen_init(void)
     lv_obj_set_style_outline_width(ui_info_button, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_outline_pad(ui_info_button, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
 
+    _settings_button_press_style(ui_settings_button);
+    _settings_button_press_style(ui_msc_button);
+    _settings_button_press_style(ui_info_button);
+
     // Foreground layer: Icons (z-order: bars < sliders < icons)
     ui_bar_brightness_icon = lv_img_create(ui_settings);
     lv_img_set_src(ui_bar_brightness_icon, &ui_img_brightness_icon_png);
@@ -327,6 +375,7 @@ void ui_settings_screen_init(void)
     lv_obj_add_event_cb(ui_settings, ui_event_settings, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_settings_button, ui_event_settings_button_click, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(ui_msc_button, ui_event_msc_button_click, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ui_info_button, ui_event_info_button_click, LV_EVENT_CLICKED, NULL);
 
     /* 左栏(ui_brightness_slider, x=42)=音量（正向）
      * 右栏(ui_volume_slider, x=100)=亮度（正向：top=最亮） */
@@ -342,6 +391,7 @@ void ui_settings_screen_init(void)
 
 void ui_settings_screen_destroy(void)
 {
+    s_info_dialog = NULL;
     if(s_wifi_lbl_timer) { lv_timer_del(s_wifi_lbl_timer); s_wifi_lbl_timer = NULL; }
     s_wifi_lbl = NULL;
     s_wifi_dot = NULL;
