@@ -25,6 +25,7 @@ static constexpr int MENU_VISIBLE  = hp::LIST_VIS;         // 7 rows (single-lin
 static constexpr int MENU2_VISIBLE = hp::LIST2_VIS;        // 5 rows (two-line)
 
 static constexpr const char* IR_DIR = "/infrared";
+static constexpr const char* LEARNED_DIR = "/infrared/learned";
 static constexpr const char* IR_LEARN_ICON_PATH = "/assets/ir_icon.png";
 
 /* ── Universal Remote directory (SD card: /infrared/universal/) ── */
@@ -182,7 +183,8 @@ static const char* kNameKeys[] = {
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
     "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
     "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3",
-    "4", "5", "6", "7", "8", "9", "_", "-", ".", "[DEL]"
+    "4", "5", "6", "7", "8", "9", "_", "-", ".", "[DEL]",
+    "<-", "OK"
 };
 static constexpr int kNameCols = 10;
 static constexpr int kNameKeyCount = (int)(sizeof(kNameKeys) / sizeof(kNameKeys[0]));
@@ -215,6 +217,9 @@ static uint8_t* _irLoadSdFile(const char* path, size_t& outLen)
 
 namespace MOONCAKE::APPS
 {
+    static bool _isFolderEntry(const String& s);
+    static bool _isUpEntry(const String& s);
+
     /* ════════════════════════════════════════════════════════════
      *  Constructor / Lifecycle
      * ════════════════════════════════════════════════════════════ */
@@ -256,9 +261,14 @@ namespace MOONCAKE::APPS
         _learnIconPng = nullptr;
 
         /* Ensure IR directory exists on SD */
-        if (!SD_MMC.exists(IR_DIR)) {
-            SD_MMC.mkdir(IR_DIR);
-        }
+        if (!SD_MMC.exists(IR_DIR)) SD_MMC.mkdir(IR_DIR);
+        if (!SD_MMC.exists(LEARNED_DIR)) SD_MMC.mkdir(LEARNED_DIR);
+        if (!SD_MMC.exists(UNIV_DIR)) SD_MMC.mkdir(UNIV_DIR);
+
+        strncpy(_remoteRoot, IR_DIR, sizeof(_remoteRoot) - 1);
+        _remoteRoot[sizeof(_remoteRoot) - 1] = '\0';
+        strncpy(_remoteDir, IR_DIR, sizeof(_remoteDir) - 1);
+        _remoteDir[sizeof(_remoteDir) - 1] = '\0';
 
         _switchScene(IrScene::MainMenu);
     }
@@ -281,8 +291,13 @@ namespace MOONCAKE::APPS
                 case IrScene::MainMenu:      _enterMainMenu();      break;
                 case IrScene::LearnWait:     _enterLearnWait();     break;
                 case IrScene::LearnResult:   _enterLearnResult();   break;
+                case IrScene::LearnSaveLocation:     _enterLearnSaveLocation();     break;
+                case IrScene::LearnSaveFolderPicker: _enterLearnSaveFolderPicker(); break;
+                case IrScene::LearnSaveFolderName:   _enterLearnSaveFolderName();   break;
                 case IrScene::LearnSaveName: _enterLearnSaveName(); break;
+                case IrScene::LearnSaveExistingConfirm: _enterLearnSaveExistingConfirm(); break;
                 case IrScene::RemoteList:    _enterRemoteList();    break;
+                case IrScene::DeleteConfirm: _enterDeleteConfirm(); break;
                 case IrScene::RemoteView:    _enterRemoteView();    break;
                 case IrScene::UniversalMenu: _enterUniversalMenu(); break;
                 case IrScene::UniversalTV:   _enterUniversalTV();   break;
@@ -295,8 +310,13 @@ namespace MOONCAKE::APPS
             case IrScene::MainMenu:      _runMainMenu();      break;
             case IrScene::LearnWait:     _runLearnWait();     break;
             case IrScene::LearnResult:   _runLearnResult();   break;
+            case IrScene::LearnSaveLocation:     _runLearnSaveLocation();     break;
+            case IrScene::LearnSaveFolderPicker: _runLearnSaveFolderPicker(); break;
+            case IrScene::LearnSaveFolderName:   _runLearnSaveFolderName();   break;
             case IrScene::LearnSaveName: _runLearnSaveName(); break;
+            case IrScene::LearnSaveExistingConfirm: _runLearnSaveExistingConfirm(); break;
             case IrScene::RemoteList:    _runRemoteList();    break;
+            case IrScene::DeleteConfirm: _runDeleteConfirm(); break;
             case IrScene::RemoteView:    _runRemoteView();    break;
             case IrScene::UniversalMenu: _runUniversalMenu(); break;
             case IrScene::UniversalTV:   _runUniversalTV();   break;
@@ -368,14 +388,25 @@ namespace MOONCAKE::APPS
         hp::drawScrollbar2(_device->Lcd, _menuCount, _scrollOffset, MENU2_VISIBLE);
     }
 
-    void App09::_drawFooter(const char* left, const char* right)
-    {
-        hp::drawFooter(_device->Lcd, left, right);
-    }
-
     void App09::_drawFooter3(const char* dirHint, const char* aHint, const char* bHint)
     {
-        hp::drawFooter3(_device->Lcd, dirHint, aHint, bHint);
+        char actions[48] = {};
+        if (aHint && aHint[0] && bHint && bHint[0]) snprintf(actions, sizeof(actions), "%s %s", aHint, bHint);
+        else snprintf(actions, sizeof(actions), "%s%s", aHint ? aHint : "", bHint ? bHint : "");
+
+        auto& Lcd = _device->Lcd;
+        Lcd.fillRect(1, hp::FTR_SEP + 1, hp::W - 2, hp::FTR_BOTTOM - hp::FTR_SEP - 1, hp::COL_BG);
+        Lcd.setFont(&fonts::efontCN_16);
+        Lcd.setTextColor(hp::COL_FG, hp::COL_BG);
+        if (dirHint && dirHint[0]) {
+            Lcd.setCursor(hp::PAD_X, hp::FTR_TXT);
+            Lcd.print(dirHint);
+        }
+        if (actions[0]) {
+            int tw = (int)strlen(actions) * 8;
+            Lcd.setCursor(hp::W - tw - hp::PAD_X, hp::FTR_TXT);
+            Lcd.print(actions);
+        }
     }
 
     void App09::_drawMsgBox(const char* line1, const char* line2)
@@ -390,9 +421,10 @@ namespace MOONCAKE::APPS
     static const char* kMainItems[] = {
         "Universal Remote",
         "Learn New Signal",
+        "Imported Remotes",
         "Saved Remotes",
     };
-    static constexpr int kMainCount = 3;
+    static constexpr int kMainCount = 4;
 
     void App09::_enterMainMenu()
     {
@@ -428,7 +460,16 @@ namespace MOONCAKE::APPS
             switch (_menuSel) {
                 case 0: _switchScene(IrScene::UniversalMenu); break;
                 case 1: _switchScene(IrScene::LearnWait);     break;
-                case 2: _switchScene(IrScene::RemoteList);    break;
+                case 2:
+                    strncpy(_remoteRoot, IR_DIR, sizeof(_remoteRoot) - 1);
+                    strncpy(_remoteDir, IR_DIR, sizeof(_remoteDir) - 1);
+                    _switchScene(IrScene::RemoteList);
+                    break;
+                case 3:
+                    strncpy(_remoteRoot, LEARNED_DIR, sizeof(_remoteRoot) - 1);
+                    strncpy(_remoteDir, LEARNED_DIR, sizeof(_remoteDir) - 1);
+                    _switchScene(IrScene::RemoteList);
+                    break;
             }
         }
         if (_device->button.B.pressed()) {
@@ -522,7 +563,7 @@ namespace MOONCAKE::APPS
     {
         _drawHeader("Signal Received");
         hp::drawHeader(_device->Lcd, "Signal Received", "OK", hp::COL_FG);
-        _drawFooter3("[O]Retry", "[A]Send", "[B]Save");
+        _drawFooter3("[^v<>]Retry", "[A]Send", "[B]Save");
 
         auto& Lcd = _device->Lcd;
         int y = MENU_Y0;
@@ -559,7 +600,7 @@ namespace MOONCAKE::APPS
 
     void App09::_runLearnResult()
     {
-        /* [O] = joystick: any direction triggers Retry */
+        /* Any joystick direction triggers Retry. */
         if (_device->button.Up.pressed()    ||
             _device->button.Down.pressed()  ||
             _device->button.Left.pressed()  ||
@@ -574,7 +615,7 @@ namespace MOONCAKE::APPS
             _sceneDirty = true;
         }
         if (_device->button.B.pressed()) {
-            _switchScene(IrScene::LearnSaveName);
+            _switchScene(IrScene::LearnSaveLocation);
         }
     }
 
@@ -596,98 +637,371 @@ namespace MOONCAKE::APPS
         );
     }
 
+    static const char* kSaveLocationItems[] = {
+        "Root folder",
+        "Choose folder",
+        "New folder",
+    };
+    static constexpr int kSaveLocationCount = sizeof(kSaveLocationItems) / sizeof(kSaveLocationItems[0]);
+
+    void App09::_enterLearnSaveLocation()
+    {
+        _menuCount = kSaveLocationCount;
+        _drawHeader("SAVE LOCATION");
+        _drawFooter3("[^v]Select", "[A]Enter", "[B]Cancel");
+        for (int i = 0; i < _menuCount; i++) {
+            _drawMenuItem(MENU_Y0 + i * ITEM_H, i, kSaveLocationItems[i], i == _menuSel);
+        }
+    }
+
+    void App09::_runLearnSaveLocation()
+    {
+        bool redraw = false;
+        if (_device->button.Up.pressed() && _menuSel > 0) { _menuSel--; redraw = true; }
+        if (_device->button.Down.pressed() && _menuSel < _menuCount - 1) { _menuSel++; redraw = true; }
+        if (redraw) _enterLearnSaveLocation();
+
+        if (_device->button.A.pressed()) {
+            if (_menuSel == 0) {
+                strcpy(_saveDir, LEARNED_DIR);
+                _saveFolderPending = false;
+                _restoreFolderName = false;
+                _switchScene(IrScene::LearnSaveName);
+            } else {
+                strcpy(_savePickerDir, LEARNED_DIR);
+                _saveFolderPending = false;
+                if (_menuSel == 1) {
+                    _restoreFolderName = false;
+                    _menuSel = 0;
+                    _scrollOffset = 0;
+                    _switchScene(IrScene::LearnSaveFolderPicker);
+                } else {
+                    _switchScene(IrScene::LearnSaveFolderName);
+                }
+            }
+            return;
+        }
+        if (_device->button.B.pressed()) {
+            _saveFolderPending = false;
+            _preserveSignalName = false;
+            _restoreFolderName = false;
+            _switchScene(IrScene::LearnResult);
+        }
+    }
+
+    void App09::_enterLearnSaveFolderPicker()
+    {
+        _fileList.clear();
+        if (strcmp(_savePickerDir, LEARNED_DIR) != 0) _fileList.push_back("..");
+        _listIrFiles(_savePickerDir, _fileList, true);
+        _fileList.erase(std::remove_if(_fileList.begin(), _fileList.end(), [](const String& item) {
+            return item != ".." && !_isFolderEntry(item);
+        }), _fileList.end());
+        _menuCount = _fileList.size();
+
+        _drawHeader("CHOOSE FOLDER");
+        const String* selected = _menuCount > 0 ? &_fileList[_menuSel + _scrollOffset] : nullptr;
+        const char* aHint = selected ? (_isUpEntry(*selected) ? "[A]Up" : "[A]Open") : nullptr;
+        _drawFooter3("[^v]Select [>]Use", aHint, "[B]Back");
+        if (_menuCount == 0) {
+            hp::clearContent(_device->Lcd);
+            _device->Lcd.setFont(&fonts::efontCN_16);
+            _device->Lcd.setTextColor(hp::COL_DIM, hp::COL_BG);
+            _device->Lcd.setCursor(20, 80);
+            _device->Lcd.print("No folders here");
+            return;
+        }
+        int end = _menuCount < MENU2_VISIBLE ? _menuCount : MENU2_VISIBLE;
+        for (int i = 0; i < end; i++) {
+            const String& entry = _fileList[i + _scrollOffset];
+            if (_isUpEntry(entry)) _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, "..", "Up one level", i == _menuSel);
+            else {
+                String name = entry.substring(0, entry.length() - 1);
+                _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, name.c_str(), "Folder", i == _menuSel);
+            }
+        }
+    }
+
+    void App09::_runLearnSaveFolderPicker()
+    {
+        if (_device->button.B.pressed()) {
+            _switchScene(IrScene::LearnSaveLocation);
+            return;
+        }
+        if (_device->button.Right.pressed()) {
+            strcpy(_saveDir, _savePickerDir);
+            _saveFolderPending = false;
+            _restoreFolderName = false;
+            _switchScene(IrScene::LearnSaveName);
+            return;
+        }
+        if (_menuCount == 0) return;
+
+        bool redraw = false;
+        if (_device->button.Up.pressed()) {
+            if (_menuSel > 0) _menuSel--;
+            else if (_scrollOffset > 0) _scrollOffset--;
+            redraw = true;
+        }
+        if (_device->button.Down.pressed()) {
+            if (_menuSel < MENU2_VISIBLE - 1 && _menuSel < _menuCount - _scrollOffset - 1) _menuSel++;
+            else if (_scrollOffset + MENU2_VISIBLE < _menuCount) _scrollOffset++;
+            redraw = true;
+        }
+        if (redraw) { _enterLearnSaveFolderPicker(); return; }
+
+        if (_device->button.A.pressed()) {
+            const String& entry = _fileList[_menuSel + _scrollOffset];
+            if (_isUpEntry(entry)) {
+                char* slash = strrchr(_savePickerDir, '/');
+                if (slash && slash != _savePickerDir) *slash = '\0';
+            } else {
+                String name = entry.substring(0, entry.length() - 1);
+                char path[sizeof(_savePickerDir)];
+                int written = snprintf(path, sizeof(path), "%s/%s", _savePickerDir, name.c_str());
+                if (written < 0 || static_cast<size_t>(written) >= sizeof(path)) {
+                    _drawMsgBox("Path too long!", "Choose a shorter path");
+                    delay(1500);
+                    _sceneDirty = true;
+                    return;
+                }
+                strcpy(_savePickerDir, path);
+            }
+            _menuSel = 0;
+            _scrollOffset = 0;
+            _enterLearnSaveFolderPicker();
+        }
+    }
+
     void App09::_enterLearnSaveName()
     {
-        strncpy(_editBuf, _learnedSig.name, sizeof(_editBuf) - 1);
-        _editBuf[sizeof(_editBuf) - 1] = '\0';
+        if (!_preserveSignalName) {
+            strncpy(_editBuf, _learnedSig.name, sizeof(_editBuf) - 1);
+            _editBuf[sizeof(_editBuf) - 1] = '\0';
+        }
+        _preserveSignalName = false;
         _editPos = strlen(_editBuf);
         _editCharIdx = 0;
         _vkSel = 0;
 
         _drawHeader("SAVE SIGNAL");
-        _drawFooter3("[^v<>]Move", "[A]Select", "[B]Save");
-
+        _drawFooter3("[^v<>]Move", "[A]Select", "[B]Back");
         _drawNameEditor();
     }
 
     void App09::_runLearnSaveName()
     {
-        bool redraw = false;
-        if (_device->button.Up.pressed() && _vkSel >= kNameCols) {
-            _vkSel -= kNameCols;
-            redraw = true;
-        }
-        if (_device->button.Down.pressed() && _vkSel + kNameCols < kNameKeyCount) {
-            _vkSel += kNameCols;
-            redraw = true;
-        }
-        if (_device->button.Left.pressed() && (_vkSel % kNameCols) > 0) {
-            _vkSel--;
-            redraw = true;
-        }
-        if (_device->button.Right.pressed() && (_vkSel % kNameCols) < (kNameCols - 1) && _vkSel + 1 < kNameKeyCount) {
-            _vkSel++;
-            redraw = true;
+        if (_device->button.B.pressed()) {
+            if (_saveFolderPending) {
+                const char* name = strrchr(_saveDir, '/');
+                strncpy(_editBuf, name ? name + 1 : _saveDir, sizeof(_editBuf) - 1);
+                _editBuf[sizeof(_editBuf) - 1] = '\0';
+                _restoreFolderName = true;
+                _switchScene(IrScene::LearnSaveFolderName);
+            } else {
+                _preserveSignalName = true;
+                _switchScene(IrScene::LearnSaveLocation);
+            }
+            return;
         }
 
+        bool redraw = false;
+        if (_device->button.Up.pressed() && _vkSel >= kNameCols) { _vkSel -= kNameCols; redraw = true; }
+        if (_device->button.Down.pressed() && _vkSel + kNameCols < kNameKeyCount) { _vkSel += kNameCols; redraw = true; }
+        if (_device->button.Left.pressed() && (_vkSel % kNameCols) > 0) { _vkSel--; redraw = true; }
+        if (_device->button.Right.pressed() && (_vkSel % kNameCols) < kNameCols - 1 && _vkSel + 1 < kNameKeyCount) { _vkSel++; redraw = true; }
+
+        bool save = false;
         if (_device->button.A.pressed()) {
             const char* key = kNameKeys[_vkSel];
-            int nameLen = strlen(_editBuf);
-            if (strcmp(key, "[DEL]") == 0) {
-                if (nameLen > 0) {
-                    _editBuf[nameLen - 1] = '\0';
+            if (strcmp(key, "<-") == 0) {
+                _saveFolderPending = false;
+                _preserveSignalName = false;
+                _restoreFolderName = false;
+                _switchScene(IrScene::LearnResult);
+                return;
+            }
+            if (strcmp(key, "OK") == 0) save = true;
+            else {
+                int nameLen = strlen(_editBuf);
+                if (strcmp(key, "[DEL]") == 0) {
+                    if (nameLen > 0) { _editBuf[nameLen - 1] = '\0'; redraw = true; }
+                } else if (nameLen < (int)sizeof(_editBuf) - 1) {
+                    _editBuf[nameLen] = key[0];
+                    _editBuf[nameLen + 1] = '\0';
                     redraw = true;
                 }
-            } else if (nameLen < (int)sizeof(_editBuf) - 1) {
-                _editBuf[nameLen] = key[0];
-                _editBuf[nameLen + 1] = '\0';
-                redraw = true;
             }
         }
-
         if (redraw) _drawNameEditor();
+        if (!save) return;
 
+        int nameLen = strlen(_editBuf);
+        while (nameLen > 0 && (_editBuf[nameLen - 1] == ' ' || _editBuf[nameLen - 1] == '_')) _editBuf[--nameLen] = '\0';
+        if (nameLen == 0) strcpy(_editBuf, "Signal");
+        strncpy(_learnedSig.name, _editBuf, sizeof(_learnedSig.name) - 1);
+
+        char path[128];
+        int written = snprintf(path, sizeof(path), "%s/%s.ir", _saveDir, _editBuf);
+        if (written < 0 || static_cast<size_t>(written) >= sizeof(path)) {
+            _drawMsgBox("Path too long!", "Use a shorter name");
+            delay(1500);
+            _sceneDirty = true;
+            return;
+        }
+        if (SD_MMC.exists(path)) {
+            strcpy(_savePath, path);
+            _menuSel = 0;
+            _switchScene(IrScene::LearnSaveExistingConfirm);
+            return;
+        }
+
+        bool createdDir = false;
+        if (_saveFolderPending && !SD_MMC.exists(_saveDir)) {
+            if (!SD_MMC.mkdir(_saveDir)) {
+                _drawMsgBox("Folder create failed", "Check SD card");
+                delay(1500);
+                _sceneDirty = true;
+                return;
+            }
+            createdDir = true;
+        }
+        bool ok = _saveSignalToFile(_saveDir, _editBuf, _learnedSig);
+        if (!ok && createdDir) SD_MMC.rmdir(_saveDir);
+        if (ok) _saveFolderPending = false;
+        _drawMsgBox(ok ? "Signal saved!" : "Save FAILED!", ok ? path : "Check SD card");
+        delay(1500);
+        _switchScene(IrScene::MainMenu);
+    }
+
+    void App09::_enterLearnSaveExistingConfirm()
+    {
+        static const char* items[] = {"Append signal", "Choose another name", "Cancel save"};
+        _menuCount = sizeof(items) / sizeof(items[0]);
+        _drawHeader("FILE EXISTS");
+        _drawFooter3("[^v]Select", "[A]Choose", "[B]Back");
+        for (int i = 0; i < _menuCount; i++)
+            _drawMenuItem(MENU_Y0 + i * ITEM_H, i, items[i], i == _menuSel);
+    }
+
+    void App09::_runLearnSaveExistingConfirm()
+    {
         if (_device->button.B.pressed()) {
-            int nameLen = strlen(_editBuf);
-            while (nameLen > 0 && (_editBuf[nameLen-1] == ' ' || _editBuf[nameLen-1] == '_')) {
-                _editBuf[--nameLen] = '\0';
-            }
-            if (nameLen == 0) strcpy(_editBuf, "Signal");
+            _preserveSignalName = true;
+            _switchScene(IrScene::LearnSaveLocation);
+            return;
+        }
+        bool redraw = false;
+        if (_device->button.Up.pressed() && _menuSel > 0) { _menuSel--; redraw = true; }
+        if (_device->button.Down.pressed() && _menuSel < _menuCount - 1) { _menuSel++; redraw = true; }
+        if (redraw) { _enterLearnSaveExistingConfirm(); return; }
+        if (!_device->button.A.pressed()) return;
 
-            strncpy(_learnedSig.name, _editBuf, sizeof(_learnedSig.name) - 1);
-
-            char path[128];
-            snprintf(path, sizeof(path), "%s/%s.ir", IR_DIR, _editBuf);
-
-            bool ok;
-            if (SD_MMC.exists(path)) {
-                ok = _appendSignalToFile(path, _learnedSig);
-            } else {
-                ok = _saveSignalToFile(IR_DIR, _editBuf, _learnedSig);
-            }
-
-            if (ok) {
-                _drawMsgBox("Signal saved!", path);
-            } else {
-                _drawMsgBox("Save FAILED!", "Check SD card");
-            }
+        if (_menuSel == 0) {
+            bool ok = _appendSignalToFile(_savePath, _learnedSig);
+            _drawMsgBox(ok ? "Signal saved!" : "Save FAILED!", ok ? _savePath : "Check SD card");
             delay(1500);
             _switchScene(IrScene::MainMenu);
+        } else if (_menuSel == 1) {
+            _preserveSignalName = true;
+            _switchScene(IrScene::LearnSaveName);
+        } else {
+            _saveFolderPending = false;
+            _preserveSignalName = false;
+            _restoreFolderName = false;
+            _switchScene(IrScene::LearnResult);
         }
     }
 
+    void App09::_enterLearnSaveFolderName()
+    {
+        if (!_restoreFolderName) _editBuf[0] = '\0';
+        _restoreFolderName = false;
+        _vkSel = 0;
+        _drawHeader("NEW FOLDER");
+        _drawFooter3("[^v<>]Move", "[A]Select", "[B]Back");
+        _drawNameEditor();
+    }
+
+    void App09::_runLearnSaveFolderName()
+    {
+        if (_device->button.B.pressed()) {
+            _restoreFolderName = true;
+            _switchScene(IrScene::LearnSaveLocation);
+            return;
+        }
+        bool redraw = false;
+        if (_device->button.Up.pressed() && _vkSel >= kNameCols) { _vkSel -= kNameCols; redraw = true; }
+        if (_device->button.Down.pressed() && _vkSel + kNameCols < kNameKeyCount) { _vkSel += kNameCols; redraw = true; }
+        if (_device->button.Left.pressed() && (_vkSel % kNameCols) > 0) { _vkSel--; redraw = true; }
+        if (_device->button.Right.pressed() && (_vkSel % kNameCols) < kNameCols - 1 && _vkSel + 1 < kNameKeyCount) { _vkSel++; redraw = true; }
+
+        bool create = false;
+        if (_device->button.A.pressed()) {
+            const char* key = kNameKeys[_vkSel];
+            if (strcmp(key, "<-") == 0) {
+                _saveFolderPending = false;
+                _restoreFolderName = false;
+                _switchScene(IrScene::LearnResult);
+                return;
+            }
+            if (strcmp(key, "OK") == 0) create = true;
+            else {
+                int nameLen = strlen(_editBuf);
+                if (strcmp(key, "[DEL]") == 0) {
+                    if (nameLen > 0) { _editBuf[nameLen - 1] = '\0'; redraw = true; }
+                } else if (nameLen < (int)sizeof(_editBuf) - 1) {
+                    _editBuf[nameLen] = key[0];
+                    _editBuf[nameLen + 1] = '\0';
+                    redraw = true;
+                }
+            }
+        }
+        if (redraw) _drawNameEditor();
+        if (!create) return;
+
+        int nameLen = strlen(_editBuf);
+        while (nameLen > 0 && (_editBuf[nameLen - 1] == ' ' || _editBuf[nameLen - 1] == '_')) _editBuf[--nameLen] = '\0';
+        if (nameLen == 0) {
+            _drawMsgBox("Folder name needed");
+            delay(1200);
+            _sceneDirty = true;
+            return;
+        }
+        int written = snprintf(_saveDir, sizeof(_saveDir), "%s/%s", _savePickerDir, _editBuf);
+        if (written < 0 || static_cast<size_t>(written) >= sizeof(_saveDir)) {
+            _drawMsgBox("Path too long!", "Use a shorter name");
+            delay(1500);
+            _sceneDirty = true;
+            return;
+        }
+        _saveFolderPending = true;
+        _preserveSignalName = false;
+        _switchScene(IrScene::LearnSaveName);
+    }
+
     /* ════════════════════════════════════════════════════════════
-     *  Saved Remotes — File list
+     *  Saved Remotes — File list (with folder navigation)
      * ════════════════════════════════════════════════════════════ */
+
+    /* Folder entries carry a trailing '/'; the synthetic parent entry
+     * is exactly ".." and is handled separately. */
+    static bool _isFolderEntry(const String& s) { return s.endsWith("/"); }
+    static bool _isUpEntry(const String& s) { return s == ".."; }
 
     void App09::_enterRemoteList()
     {
         _fileList.clear();
-        _listIrFiles(IR_DIR, _fileList);
+        if (strcmp(_remoteDir, _remoteRoot) != 0) _fileList.push_back("..");
+        _listIrFiles(_remoteDir, _fileList, true);
         _menuCount = _fileList.size();
 
-        _drawHeader("Saved Remotes");
-        _drawFooter3("[^v]Select", "[A]Open", "[B]Back");
+        _drawHeader(strcmp(_remoteRoot, IR_DIR) == 0 ? "Imported Remotes" : "Saved Remotes");
+        const String* selected = _menuCount > 0 ? &_fileList[_menuSel + _scrollOffset] : nullptr;
+        const char* aHint = selected ? "[A]Send" : nullptr;
+        if (selected && _isUpEntry(*selected)) aHint = "[A]Up";
+        else if (selected && _isFolderEntry(*selected)) aHint = "[A]Open";
+        _drawFooter3(selected ? "[^v]Sel [>]Del" : nullptr, aHint, "[B]Back");
 
         if (_menuCount == 0) {
             auto& Lcd = _device->Lcd;
@@ -697,15 +1011,23 @@ namespace MOONCAKE::APPS
             Lcd.setCursor(20, 80);
             Lcd.print("No .ir files found");
             Lcd.setCursor(20, 105);
-            Lcd.printf("Place in: %s/", IR_DIR);
+            Lcd.printf("Place in: %s/", _remoteDir);
         } else {
             int end = _menuCount < MENU2_VISIBLE ? _menuCount : MENU2_VISIBLE;
             for (int i = 0; i < end; i++) {
-                String name = _fileList[i + _scrollOffset];
-                int dot = name.lastIndexOf('.');
-                if (dot >= 0) name = name.substring(0, dot);
-                _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i,
-                               name.c_str(), "IR Remote", i == _menuSel);
+                const String& entry = _fileList[i + _scrollOffset];
+                if (_isUpEntry(entry)) {
+                    _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, "..", "Up one level", i == _menuSel);
+                } else if (_isFolderEntry(entry)) {
+                    String name = entry.substring(0, entry.length() - 1);
+                    _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, name.c_str(), "Folder", i == _menuSel);
+                } else {
+                    String name = entry;
+                    int dot = name.lastIndexOf('.');
+                    if (dot >= 0) name = name.substring(0, dot);
+                    _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i,
+                                   name.c_str(), "IR Remote", i == _menuSel);
+                }
             }
         }
     }
@@ -737,33 +1059,153 @@ namespace MOONCAKE::APPS
             if (visible > MENU2_VISIBLE) visible = MENU2_VISIBLE;
             for (int i = 0; i < MENU2_VISIBLE; i++) {
                 if (i < visible) {
-                    String name = _fileList[i + _scrollOffset];
-                    int dot = name.lastIndexOf('.');
-                    if (dot >= 0) name = name.substring(0, dot);
-                    _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i,
-                                   name.c_str(), "IR Remote", i == _menuSel);
+                    const String& entry = _fileList[i + _scrollOffset];
+                    if (_isUpEntry(entry)) {
+                        _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, "..", "Up one level", i == _menuSel);
+                    } else if (_isFolderEntry(entry)) {
+                        String name = entry.substring(0, entry.length() - 1);
+                        _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i, name.c_str(), "Folder", i == _menuSel);
+                    } else {
+                        String name = entry;
+                        int dot = name.lastIndexOf('.');
+                        if (dot >= 0) name = name.substring(0, dot);
+                        _drawMenuItem2(MENU_Y0 + i * ITEM2_H, i,
+                                       name.c_str(), "IR Remote", i == _menuSel);
+                    }
                 } else {
                     _device->Lcd.fillRect(0, MENU_Y0 + i * ITEM2_H, SCR_W, ITEM2_H, hp::COL_BG);
                 }
             }
+            const String& selected = _fileList[_menuSel + _scrollOffset];
+            const char* aHint = _isUpEntry(selected) ? "[A]Up" :
+                                (_isFolderEntry(selected) ? "[A]Open" : "[A]Send");
+            _drawFooter3("[^v]Sel [>]Del", aHint, "[B]Back");
         }
 
         if (_device->button.A.pressed()) {
             int idx = _menuSel + _scrollOffset;
-            char path[128];
-            snprintf(path, sizeof(path), "%s/%s", IR_DIR, _fileList[idx].c_str());
+            const String& entry = _fileList[idx];
 
-            if (_loadRemote(path, _currentRemote)) {
-                _switchScene(IrScene::RemoteView);
+            if (_isUpEntry(entry)) {
+                _goUpRemoteDir();
+            } else if (_isFolderEntry(entry)) {
+                String sub = entry.substring(0, entry.length() - 1);
+                char path[sizeof(_remoteDir)];
+                int written = snprintf(path, sizeof(path), "%s/%s", _remoteDir, sub.c_str());
+                if (written < 0 || static_cast<size_t>(written) >= sizeof(path)) {
+                    _drawMsgBox("Path too long!", "Choose a shorter path");
+                    delay(1500);
+                    _sceneDirty = true;
+                    return;
+                }
+                strcpy(_remoteDir, path);
+                _menuSel = 0;
+                _scrollOffset = 0;
+                _enterRemoteList();
             } else {
-                _drawMsgBox("Failed to load!", path);
-                delay(1500);
-                _sceneDirty = true;
+                char path[128];
+                int written = snprintf(path, sizeof(path), "%s/%s", _remoteDir, entry.c_str());
+                if (written < 0 || static_cast<size_t>(written) >= sizeof(path)) {
+                    _drawMsgBox("Path too long!", "Choose a shorter path");
+                    delay(1500);
+                    _sceneDirty = true;
+                    return;
+                }
+
+                if (_loadRemote(path, _currentRemote) && !_currentRemote.signals.empty()) {
+                    _txSignal(_currentRemote.signals.front());
+                    hp::drawToast(_device->Lcd, "SENT", hp::COL_FG);
+                    delay(200);
+                    _sceneDirty = true;
+                } else {
+                    _drawMsgBox("No signal found", path);
+                    delay(1500);
+                    _sceneDirty = true;
+                }
             }
         }
         if (_device->button.B.pressed()) {
-            _switchScene(IrScene::MainMenu);
+            if (strcmp(_remoteDir, _remoteRoot) != 0) {
+                _goUpRemoteDir();
+            } else {
+                _switchScene(IrScene::MainMenu);
+            }
         }
+        if (_device->button.Right.pressed()) {
+            const String& entry = _fileList[_menuSel + _scrollOffset];
+            if (_isUpEntry(entry)) return;
+
+            String name = _isFolderEntry(entry) ? entry.substring(0, entry.length() - 1) : entry;
+            int written = snprintf(_deletePath, sizeof(_deletePath), "%s/%s", _remoteDir, name.c_str());
+            if (written < 0 || static_cast<size_t>(written) >= sizeof(_deletePath)) {
+                _drawMsgBox("Path too long!", "Cannot delete entry");
+                delay(1500);
+                _sceneDirty = true;
+                return;
+            }
+            size_t universalLen = strlen(UNIV_DIR);
+            size_t learnedLen = strlen(LEARNED_DIR);
+            if (strcmp(_deletePath, UNIV_DIR) == 0 ||
+                (strncmp(_deletePath, UNIV_DIR, universalLen) == 0 && _deletePath[universalLen] == '/') ||
+                strcmp(_deletePath, LEARNED_DIR) == 0 ||
+                (strncmp(_deletePath, LEARNED_DIR, learnedLen) == 0 && _deletePath[learnedLen] == '/')) {
+                _drawMsgBox("Protected folder", "Managed remotes kept");
+                delay(1500);
+                _sceneDirty = true;
+                return;
+            }
+            _deleteFolder = _isFolderEntry(entry);
+            _switchScene(IrScene::DeleteConfirm);
+        }
+    }
+
+    void App09::_enterDeleteConfirm()
+    {
+        _drawHeader("DELETE");
+        const char* name = strrchr(_deletePath, '/');
+        _drawMsgBox(_deleteFolder ? "Delete empty folder?" : "Delete remote?", name ? name + 1 : _deletePath);
+        _drawFooter3(nullptr, "[A]Delete", "[B]Cancel");
+    }
+
+    void App09::_runDeleteConfirm()
+    {
+        if (_device->button.B.pressed()) {
+            _switchScene(IrScene::RemoteList);
+            return;
+        }
+        if (!_device->button.A.pressed()) return;
+
+        bool deleted = false;
+        if (_deleteFolder) {
+            if (!_isDirectoryEmpty(_deletePath)) {
+                _drawMsgBox("Folder not empty", "Delete contents first");
+                delay(1500);
+                _switchScene(IrScene::RemoteList);
+                return;
+            }
+            deleted = SD_MMC.rmdir(_deletePath);
+        } else {
+            deleted = SD_MMC.remove(_deletePath);
+        }
+
+        _drawMsgBox(deleted ? "Deleted" : "Delete failed", deleted ? _deletePath : "Check SD card");
+        delay(1500);
+        _switchScene(IrScene::RemoteList);
+    }
+
+    /* Move _remoteDir up one folder level (never above IR_DIR) and
+     * refresh the list in place. */
+    void App09::_goUpRemoteDir()
+    {
+        char* slash = strrchr(_remoteDir, '/');
+        if (slash && slash != _remoteDir) *slash = '\0';
+        if (strlen(_remoteDir) < strlen(_remoteRoot)) {
+            strncpy(_remoteDir, _remoteRoot, sizeof(_remoteDir) - 1);
+            _remoteDir[sizeof(_remoteDir) - 1] = '\0';
+        }
+        _menuSel = 0;
+        _scrollOffset = 0;
+        _enterRemoteList();
     }
 
     /* ════════════════════════════════════════════════════════════
@@ -988,9 +1430,8 @@ namespace MOONCAKE::APPS
     void App09::_enterUniversalTV()
     {
         auto& Lcd = _device->Lcd;
-        hp::drawChrome(Lcd);
-        hp::drawHeader(Lcd, _univCatTitle, "REMOTE", hp::COL_FG);
-        hp::drawFooter3(Lcd, "[^v<>]Select", "[A]Blast", "[B]Back");
+        _drawHeader(_univCatTitle);
+        _drawFooter3("[^v<>]Select", "[A]Blast", "[B]Back");
 
         if (_univBlastIdx >= 0 && _univBlastIdx < kUnivKnownCount) {
             /* Known category: use hardcoded button definitions */
@@ -1402,18 +1843,41 @@ namespace MOONCAKE::APPS
         }
     }
 
-    void App09::_txSignal(const IrSignal& sig)
+    static void sendNec42(IRsend* send, uint32_t address, uint32_t command, bool extended) {
+        send->enableIROut(38); send->mark(9000); send->space(4500);
+        uint64_t bits = extended ? ((static_cast<uint64_t>(address & 0x03ffffffU) << 16) | (command & 0xffffU)) : (static_cast<uint64_t>(address & 0x1fffU) | (static_cast<uint64_t>((~address) & 0x1fffU) << 13) | (static_cast<uint64_t>(command & 0xffU) << 26) | (static_cast<uint64_t>((~command) & 0xffU) << 34));
+        for (uint8_t i = 0; i < 42; i++) { send->mark(560); send->space((bits >> i) & 1U ? 1690 : 560); }
+        send->mark(560); send->space(0);
+    }
+
+    static void sendRca(IRsend* send, uint32_t address, uint32_t command) {
+        send->enableIROut(56); send->mark(4000); send->space(4000);
+        uint32_t bits = (address & 0xfU) | ((command & 0xffU) << 4) | (((~address) & 0xfU) << 12) | (((~command) & 0xffU) << 16);
+        for (uint8_t i = 0; i < 24; i++) { send->mark(500); send->space((bits >> i) & 1U ? 1500 : 500); }
+        send->mark(500); send->space(0);
+    }
+
+    bool App09::_txSignal(const IrSignal& sig)
     {
-        if (!_irSend) return;
+        if (!_irSend || !sig.isSupported) return false;
+        if (strcasecmp(sig.parsedProtocol, "NEC42") == 0) { sendNec42(_irSend, sig.address, sig.command, false); return true; }
+        if (strcasecmp(sig.parsedProtocol, "NEC42ext") == 0) { sendNec42(_irSend, sig.address, sig.command, true); return true; }
+        if (strcasecmp(sig.parsedProtocol, "RCA") == 0) { sendRca(_irSend, sig.address, sig.command); return true; }
 
         if (sig.isRaw) {
-            if (!sig.rawData.empty()) {
-                _irSend->sendRaw(sig.rawData.data(), sig.rawData.size(),
-                                 sig.frequency / 1000);
+            if (sig.rawData.empty() || sig.rawData.size() > 1024) return false;
+            std::vector<uint16_t> timings;
+            timings.reserve(sig.rawData.size());
+            for (uint32_t timing : sig.rawData) {
+                if (timing == 0 || timing > UINT16_MAX) return false;
+                timings.push_back(static_cast<uint16_t>(timing));
             }
-        } else {
-            _irSend->send(sig.protocol, sig.value, sig.bits);
+            _irSend->sendRaw(timings.data(), timings.size(), sig.frequency / 1000);
+            return true;
         }
+
+        _irSend->send(sig.protocol, sig.value, sig.bits);
+        return true;
     }
 
     /* ════════════════════════════════════════════════════════════
@@ -1505,7 +1969,7 @@ namespace MOONCAKE::APPS
         if (sig.isRaw) {
             f.println("type: raw");
             f.printf("frequency: %lu\n", sig.frequency);
-            f.println("duty_cycle: 0.330000");
+            f.printf("duty_cycle: %.6f\n", sig.dutyCycle);
             f.print("data:");
             for (size_t i = 0; i < sig.rawData.size(); i++) {
                 f.printf(" %u", sig.rawData[i]);
@@ -1514,6 +1978,11 @@ namespace MOONCAKE::APPS
         } else {
             f.println("type: parsed");
             f.printf("protocol: %s\n", typeToFlipperProto(sig.protocol));
+            /* Preserve the exact decoder value used by IRremoteESP8266.
+             * Flipper's address/command fields are not sufficient to
+             * reconstruct it for every protocol. */
+            f.printf("value: 0x%llX\n", (unsigned long long)sig.value);
+            f.printf("bits: %u\n", (unsigned)sig.bits);
 
             char addrBuf[32], cmdBuf[32];
             int nbytes = (sig.bits + 7) / 8;
@@ -1556,11 +2025,15 @@ namespace MOONCAKE::APPS
             s.address   = 0;
             s.command   = 0;
             s.frequency = 38000;
+            s.dutyCycle = 0.33f;
+            s.isSupported = true;
         };
 
         IrSignal sig;
         resetSig(sig);
         bool inSignal = false;
+        bool hasSerializedValue = false;
+        bool hasSerializedBits = false;
         String line;
 
         while (f.available()) {
@@ -1579,6 +2052,8 @@ namespace MOONCAKE::APPS
                     }
                 }
                 resetSig(sig);
+                hasSerializedValue = false;
+                hasSerializedBits = false;
                 strncpy(sig.name, line.c_str() + 6, sizeof(sig.name) - 1);
                 sig.name[sizeof(sig.name) - 1] = '\0';
                 inSignal = true;
@@ -1591,7 +2066,18 @@ namespace MOONCAKE::APPS
             else if (line.startsWith("protocol: ")) {
                 String proto = line.substring(10);
                 proto.trim();
+                strncpy(sig.parsedProtocol, proto.c_str(), sizeof(sig.parsedProtocol) - 1);
+                sig.parsedProtocol[sizeof(sig.parsedProtocol) - 1] = '\0';
                 sig.protocol = flipperProtoToType(proto.c_str());
+                sig.isSupported = (sig.protocol != UNKNOWN || strcasecmp(proto.c_str(), "NEC42") == 0 || strcasecmp(proto.c_str(), "NEC42ext") == 0 || strcasecmp(proto.c_str(), "RCA") == 0);
+            }
+            else if (line.startsWith("value: ")) {
+                sig.value = strtoull(line.c_str() + 7, nullptr, 0);
+                hasSerializedValue = true;
+            }
+            else if (line.startsWith("bits: ")) {
+                sig.bits = line.substring(6).toInt();
+                hasSerializedBits = true;
             }
             else if (line.startsWith("address: ")) {
                 sig.address = parseHexBytes(line.c_str() + 9);
@@ -1599,12 +2085,20 @@ namespace MOONCAKE::APPS
             else if (line.startsWith("command: ")) {
                 sig.command = parseHexBytes(line.c_str() + 9);
                 if (!sig.isRaw) {
-                    sig.bits = 32;
-                    sig.value = ((uint64_t)sig.address) | ((uint64_t)sig.command << 16);
+                    /* Only reconstruct the fields that weren't serialized
+                     * directly — a file may carry a real "bits:" value
+                     * without a "value:" field (or vice versa), so each
+                     * fallback must be guarded independently to avoid
+                     * clobbering data that was actually round-tripped. */
+                    if (!hasSerializedBits) sig.bits = 32;
+                    if (!hasSerializedValue) sig.value = ((uint64_t)sig.address) | ((uint64_t)sig.command << 16);
                 }
             }
             else if (line.startsWith("frequency: ")) {
-                sig.frequency = line.substring(11).toInt();
+                sig.frequency = static_cast<uint32_t>(strtoul(line.c_str() + 11, nullptr, 10));
+            }
+            else if (line.startsWith("duty_cycle: ")) {
+                sig.dutyCycle = strtof(line.c_str() + 12, nullptr);
             }
             else if (line.startsWith("data: ")) {
                 const char* p = line.c_str() + 6;
@@ -1614,7 +2108,8 @@ namespace MOONCAKE::APPS
                     char* end;
                     long val = strtol(p, &end, 10);
                     if (end == p) break;
-                    sig.rawData.push_back((uint16_t)val);
+                    if (val <= 0 || val > UINT32_MAX || sig.rawData.size() >= 1024) { sig.isSupported = false; break; }
+                    sig.rawData.push_back(static_cast<uint32_t>(val));
                     p = end;
                 }
             }
@@ -1638,7 +2133,7 @@ namespace MOONCAKE::APPS
         File f = SD_MMC.open(path, FILE_WRITE);
         if (!f) return false;
 
-        f.println("Filetype: IR signals file");
+        f.println("Filetype: MeowKit IR signals file");
         f.println("Version: 1");
         f.println("#");
         writeSignalEntry(f, sig);
@@ -1657,24 +2152,51 @@ namespace MOONCAKE::APPS
         return true;
     }
 
-    void App09::_listIrFiles(const char* dir, std::vector<String>& out)
+    bool App09::_isDirectoryEmpty(const char* path)
+    {
+        File dir = SD_MMC.open(path);
+        if (!dir || !dir.isDirectory()) return false;
+        File entry = dir.openNextFile();
+        bool empty = !entry;
+        entry.close();
+        dir.close();
+        return empty;
+    }
+
+    void App09::_listIrFiles(const char* dir, std::vector<String>& out, bool includeFolders)
     {
         File root = SD_MMC.open(dir);
         if (!root || !root.isDirectory()) return;
 
+        /* When requested, folders are listed first (sorted), then .ir files (sorted).
+         * A folder entry is marked with a trailing '/' so callers can
+         * tell it apart from a file without a second filesystem lookup. */
+        std::vector<String> dirs;
+        std::vector<String> files;
+
         File file = root.openNextFile();
         while (file) {
-            if (!file.isDirectory()) {
-                String name = file.name();
-                if (name.endsWith(".ir") || name.endsWith(".IR")) {
-                    const char* slash = strrchr(file.name(), '/');
-                    out.push_back(slash ? String(slash + 1) : name);
+            const char* slash = strrchr(file.name(), '/');
+            String base = slash ? String(slash + 1) : String(file.name());
+            if (file.isDirectory()) {
+                if (strcmp(dir, IR_DIR) == 0 && (base == "learned" || base == "universal")) {
+                    file.close();
+                    file = root.openNextFile();
+                    continue;
                 }
+                if (includeFolders && base.length() > 0) dirs.push_back(base + "/");
+            } else if (base.endsWith(".ir") || base.endsWith(".IR")) {
+                files.push_back(base);
             }
             file.close();
             file = root.openNextFile();
         }
         root.close();
+
+        std::sort(dirs.begin(), dirs.end());
+        std::sort(files.begin(), files.end());
+        out.insert(out.end(), dirs.begin(), dirs.end());
+        out.insert(out.end(), files.begin(), files.end());
     }
 
 }  /* namespace MOONCAKE::APPS */
