@@ -150,6 +150,10 @@ static void tab_factory_reset_cb(lv_event_t * e)
     lv_obj_set_style_bg_color(mbox,    lv_color_hex(TV_CARD),  LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(mbox, lv_color_hex(TV_DANGER), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(mbox, 2,                      LV_PART_MAIN | LV_STATE_DEFAULT);
+    /* Sans ceci, titre et message héritent du gris sombre du thème par défaut,
+     * illisible sur le fond TV_CARD : seuls les boutons ressortaient. Les
+     * propriétés de texte étant héritées, la régler sur la boîte suffit. */
+    lv_obj_set_style_text_color(mbox, lv_color_hex(TV_TEXT), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_center(mbox);
     lv_obj_add_event_cb(mbox, _fr_msgbox_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
