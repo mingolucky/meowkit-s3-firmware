@@ -35,6 +35,9 @@ LV_IMG_DECLARE(ui_img_temp2_full_png);    // assets/temp2_full.png
 
 // SCREEN: ui_PC_Monitor
 void ui_PC_Monitor_screen_init(void);
+/* Pilote les quatre jauges horizontales. Températures en °C, charges en %. */
+void ui_pc_monitor_set_gauges(int cpu_temp_c, int cpu_load_pct,
+                              int gpu_temp_c, int gpu_load_pct);
 void ui_pc_monitor_init(void); // optional helper to init and load screen
 
 // Widgets

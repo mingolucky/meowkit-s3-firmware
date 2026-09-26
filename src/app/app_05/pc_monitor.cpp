@@ -18,6 +18,12 @@ String inputString = "";
 bool stringComplete = false;
 const int Serial0_eventDelay = 15;
 static bool s_hasData = false; // The value will not be displayed until the first complete frame of data is received.
+static uint32_t s_lastFrameMs = 0; // Date de la dernière trame complète reçue.
+
+/* L'hôte émet une trame par seconde. Au-delà de ce délai sans rien recevoir, on
+ * considère qu'il n'y a plus personne : câble débranché, service arrêté, PC
+ * éteint. Trois secondes tolèrent une trame manquée sans clignoter. */
+#define PCMON_STALE_MS 3000
 
 void style_01(DEVICES* _device) {
     //------------------------------------------- Update UI widgets (LVGL) ----------------------------------------------------//
@@ -83,6 +89,11 @@ void style_01(DEVICES* _device) {
     /*GPU LOAD*/
     lv_label_set_text(ui_gpu_percent, gpuString2.c_str());
 
+    /* Les quatre barres dégradées suivent désormais les valeurs affichées ;
+     * elles montraient jusqu'ici le dégradé complet en permanence. */
+    ui_pc_monitor_set_gauges(cpuString1.toInt(), cpuString2.toInt(),
+                             gpuString1.toInt(), gpuString2.toInt());
+
   //----------------------------------------SYSTEM  RAM TOTAL---------------------------------------------------//
   /*SYSTEM RAM String*/
   int ramStringStart = inputString.indexOf("R", gpuStringLimit);
@@ -145,6 +156,23 @@ void style_01(DEVICES* _device) {
 }
 
 
+/* Remet l'écran à l'état « aucune donnée » : libellés vides et jauges à zéro.
+ * Un libellé vide dit « rien à afficher » ; un « 0 » affirmerait une mesure,
+ * ce qui serait faux — un CPU n'est pas à 0 °C parce que le câble est débranché. */
+static void pc_monitor_blank()
+{
+    lv_label_set_text(ui_cpu_name, "");
+    lv_label_set_text(ui_gpu_name, "");
+    lv_label_set_text(ui_cpu_temp, "");
+    lv_label_set_text(ui_cpu_percent, "");
+    lv_label_set_text(ui_gpu_temp, "");
+    lv_label_set_text(ui_gpu_percent, "");
+    lv_label_set_text(ui_RAM, "");
+    lv_label_set_text(ui_mhz, "");
+    lv_label_set_text(ui_gpu_ram, "");
+    ui_pc_monitor_set_gauges(0, 0, 0, 0);
+}
+
 namespace MOONCAKE::APPS
 {
     PCMonitor::PCMonitor(DEVICES* device)
@@ -162,22 +190,7 @@ namespace MOONCAKE::APPS
         // Loading the LVGL interface (two fonts, three images)
         ui_pc_monitor_init();
 
-        // Clear all numerical display when entering for the first time to avoid displaying old values ​​or placeholder text
-        // CPU/GPU name
-        lv_label_set_text(ui_cpu_name, "");
-        lv_label_set_text(ui_gpu_name, "");
-        // CPU temperature/occupancy
-        lv_label_set_text(ui_cpu_temp, "");
-        lv_label_set_text(ui_cpu_percent, "");
-        // GPU temperature/occupancy
-        lv_label_set_text(ui_gpu_temp, "");
-        lv_label_set_text(ui_gpu_percent, "");
-        // RAM used/total
-        lv_label_set_text(ui_RAM, "");
-        // CPU frequency
-        lv_label_set_text(ui_mhz, "");
-        // Total video memory
-        lv_label_set_text(ui_gpu_ram, "");
+        pc_monitor_blank();
     }
 
     void PCMonitor::onRunning()
@@ -194,9 +207,16 @@ namespace MOONCAKE::APPS
 
         if (stringComplete) {
             s_hasData = true; // Receive the first complete frame of data
+            s_lastFrameMs = millis();
             style_01(_device);
             inputString = "";
             stringComplete = false;
+        }
+        else if (s_hasData && (millis() - s_lastFrameMs) > PCMON_STALE_MS) {
+            /* Plus rien n'arrive : effacer plutôt que laisser des valeurs
+             * périmées, qui ont l'apparence de mesures vivantes. */
+            s_hasData = false;
+            pc_monitor_blank();
         }
         // Let LVGL process tasks to refresh the screen
         lv_timer_handler();
