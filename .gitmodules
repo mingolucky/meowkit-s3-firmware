@@ -1,0 +1,12 @@
+[submodule "lib/mooncake"]
+	path = lib/mooncake
+	url = https://github.com/Forairaaaaa/mooncake.git
+[submodule "lib/IRremoteESP8266"]
+	path = lib/IRremoteESP8266
+	url = https://github.com/crankyoldgit/IRremoteESP8266.git
+[submodule "lib/arduinoFFT"]
+	path = lib/arduinoFFT
+	url = https://github.com/kosme/arduinoFFT.git
+[submodule "lib/ESP32-BLE-Mouse"]
+	path = lib/ESP32-BLE-Mouse
+	url = https://github.com/T-vK/ESP32-BLE-Mouse.git
