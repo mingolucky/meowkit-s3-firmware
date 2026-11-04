@@ -32,6 +32,12 @@ public:
     /// Release I2C driver.
     bool release(void) const;
 
+    /// Atomic raw transaction, optionally with a repeated START before reading.
+    /// Uses the same mutex as register access on this shared bus.
+    bool transfer(std::uint8_t address, const std::uint8_t* tx, std::size_t txLength,
+                  std::uint8_t* rx, std::size_t rxLength,
+                  std::uint32_t timeoutMs = 100) const;
+
     // ── Register-level operations (complete START…STOP transaction) ──
 
     /// Write multiple bytes to register.

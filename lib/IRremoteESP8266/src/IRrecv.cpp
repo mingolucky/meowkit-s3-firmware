@@ -333,9 +333,6 @@ IRrecv::IRrecv(const uint16_t recvpin, const uint16_t bufsize,
 /// timers or interrupts used.
 IRrecv::~IRrecv(void) {
   disableIRIn();
-#if defined(ESP32)
-  if (timer != NULL) timerEnd(timer);  // Cleanup the ESP32 timeout timer.
-#endif  // ESP32
   delete[] params.rawbuf;
   if (params_save != NULL) {
     delete[] params_save->rawbuf;
@@ -347,6 +344,10 @@ IRrecv::~IRrecv(void) {
 /// @param[in] pullup A flag indicating should the GPIO use the internal pullup
 /// resistor. (Default: `false`. i.e. No.)
 void IRrecv::enableIRIn(const bool pullup) {
+#if defined(ESP32)
+  // Re-enabling must release the previous timer/ISR before starting another.
+  if (timer != NULL) disableIRIn();
+#endif  // ESP32
   // ESP32's seem to require explicitly setting the GPIO to INPUT etc.
   // This wasn't required on the ESP8266s, but it shouldn't hurt to make sure.
   if (pullup) {
@@ -394,15 +395,22 @@ void IRrecv::enableIRIn(const bool pullup) {
 /// Disable any timers and interrupts.
 void IRrecv::disableIRIn(void) {
 #ifndef UNIT_TEST
+  // Stop GPIO capture before releasing the timer used by gpio_intr().
+  params.rcvstate = kStopState;
+  detachInterrupt(params.recvpin);
 #if defined(ESP8266)
   os_timer_disarm(&timer);
 #endif  // ESP8266
 #if defined(ESP32)
-  timerAlarmDisable(timer);
-  timerDetachInterrupt(timer);
-  timerEnd(timer);
+  // The receiver may never have been enabled, or may already be stopped.
+  // Arduino's ESP32 timer APIs dereference the handle without a null check.
+  if (timer != NULL) {
+    timerAlarmDisable(timer);
+    timerDetachInterrupt(timer);
+    timerEnd(timer);
+    timer = NULL;
+  }
 #endif  // ESP32
-  detachInterrupt(params.recvpin);
 #endif  // UNIT_TEST
 }
 
@@ -426,8 +434,10 @@ void IRrecv::resume(void) {
   params.rawlen = 0;
   params.overflow = false;
 #if defined(ESP32)
-  timerAlarmDisable(timer);
-  gpio_intr_enable((gpio_num_t)params.recvpin);
+  if (timer != NULL) {
+    timerAlarmDisable(timer);
+    gpio_intr_enable((gpio_num_t)params.recvpin);
+  }
 #endif  // ESP32
 }
 

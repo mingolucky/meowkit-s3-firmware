@@ -22,6 +22,11 @@ typedef enum {
     USB_MODE_MSC  = 2,   /* U-disk (SD card exposed to host) */
 } usb_mode_t;
 
+/** Initialize the existing CDC and defer 1200bps reboot requests to poll(). */
+void usb_manager_init(void);
+/** Call from the main loop, outside TinyUSB/CDC event handlers. */
+void usb_manager_poll(void);
+
 /** Request a USB mode.
  *  If another mode is active it is torn down first.
  *  Returns 1 on success, 0 on failure (previous mode is also stopped). */

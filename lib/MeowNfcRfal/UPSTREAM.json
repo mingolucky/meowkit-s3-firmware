@@ -1,0 +1,325 @@
+{
+  "repository": "https://github.com/stm32duino/NFC-RFAL",
+  "revision": {
+    "sha": "8926e585ae7966c8f6e9f8a784a31d0657188174",
+    "date": "2025-04-02T10:08:47Z"
+  },
+  "files": [
+    {
+      "path": "src/ndef_buffer.h",
+      "gitBlob": "bb45f5dbf69ad0002c4530b921e278e9a96fe75d"
+    },
+    {
+      "path": "src/ndef_class.h",
+      "gitBlob": "ab2a781a7c5a5cc8c5086b53461eeb63ad7a40b7"
+    },
+    {
+      "path": "src/ndef_config.h",
+      "gitBlob": "eb2ac3496ac0bfec2a1404702880a0c671ffb3d7"
+    },
+    {
+      "path": "src/ndef_default_config.h",
+      "gitBlob": "081c7581e3b1cb26b05b8d4b4f58d588fdbdd8ca"
+    },
+    {
+      "path": "src/ndef_message.cpp",
+      "gitBlob": "f0c6c8d21f2f50881540d760e0d6a2e3a0bfee0a"
+    },
+    {
+      "path": "src/ndef_message.h",
+      "gitBlob": "acf923d7b6968e6af03d46cb4d3c170ab806a692"
+    },
+    {
+      "path": "src/ndef_poller.cpp",
+      "gitBlob": "f6ccb0e1f33d7202abb64d25c3710cd1f0685517"
+    },
+    {
+      "path": "src/ndef_poller.h",
+      "gitBlob": "2e37d4a757fedd346722cac904fe8c53ddfd9103"
+    },
+    {
+      "path": "src/ndef_poller_message.cpp",
+      "gitBlob": "3029a13de922f5b42e1de9ba4ea6c8e798fc22ea"
+    },
+    {
+      "path": "src/ndef_poller_rf.cpp",
+      "gitBlob": "30d77dd4f400f0c95d11dfe5dc56a956fb1adb4c"
+    },
+    {
+      "path": "src/ndef_record.cpp",
+      "gitBlob": "201ecefb0252369e924c62372c20a01feda92564"
+    },
+    {
+      "path": "src/ndef_record.h",
+      "gitBlob": "948ed4f8045ced901c369b99ccf1ada91ccce52b"
+    },
+    {
+      "path": "src/ndef_t2t.cpp",
+      "gitBlob": "9fd07d1843088e06f49498d09a41beba69c0dbeb"
+    },
+    {
+      "path": "src/ndef_t2t.h",
+      "gitBlob": "f410087960c9fd7dde01b8f929446f4f27a4e37c"
+    },
+    {
+      "path": "src/ndef_t3t.cpp",
+      "gitBlob": "81b5aa5c2cff7bf5b6bb067f36309518c780b080"
+    },
+    {
+      "path": "src/ndef_t3t.h",
+      "gitBlob": "4b5f504032a1e27af87d524b5cd69bcdfd06129f"
+    },
+    {
+      "path": "src/ndef_t4t.cpp",
+      "gitBlob": "b5b972e87eabeee93d8e70741857e89d4e612f92"
+    },
+    {
+      "path": "src/ndef_t4t.h",
+      "gitBlob": "3448400ce34d1658215211f90881808d356f3d5e"
+    },
+    {
+      "path": "src/ndef_t5t.cpp",
+      "gitBlob": "abe5d99ca7fbe4bc1b9a0fc4bc46113bcdf59c06"
+    },
+    {
+      "path": "src/ndef_t5t.h",
+      "gitBlob": "1cf4ea0a748ca57ee4cdc18b2057b6962cec1c5a"
+    },
+    {
+      "path": "src/ndef_t5t_hal.h",
+      "gitBlob": "7209a75c64a0a96ae2832e48f4d8ee90d81063d9"
+    },
+    {
+      "path": "src/ndef_t5t_rf.cpp",
+      "gitBlob": "ccf5656e2f9b129122ff218f086426c467b0b4c5"
+    },
+    {
+      "path": "src/ndef_type_aar.cpp",
+      "gitBlob": "4f58ab815be29056d153aa4a927cd98cee8448b4"
+    },
+    {
+      "path": "src/ndef_type_aar.h",
+      "gitBlob": "c74bb34d3048f61b0ff8d539fd2407253a666884"
+    },
+    {
+      "path": "src/ndef_type_bluetooth.cpp",
+      "gitBlob": "88720353826c22fa509336051ea177ac04aa6757"
+    },
+    {
+      "path": "src/ndef_type_bluetooth.h",
+      "gitBlob": "b015e459e993304e511aa92c7e0e083534a189cc"
+    },
+    {
+      "path": "src/ndef_type_deviceinfo.cpp",
+      "gitBlob": "d19ec976b49c6b4693d3d294701b67c280980fd2"
+    },
+    {
+      "path": "src/ndef_type_deviceinfo.h",
+      "gitBlob": "a9b56fd71e8321473328714ad1dd60c723bdcd6f"
+    },
+    {
+      "path": "src/ndef_type_empty.cpp",
+      "gitBlob": "34aa2c4c7be2a19d36c98f41e1cf0b8d41a8633b"
+    },
+    {
+      "path": "src/ndef_type_empty.h",
+      "gitBlob": "1fdb3883c98a8a666ec87d3a071276ae7df5fa0f"
+    },
+    {
+      "path": "src/ndef_type_flat.cpp",
+      "gitBlob": "54e87c99a46c936903b541cf7fce60a468482537"
+    },
+    {
+      "path": "src/ndef_type_flat.h",
+      "gitBlob": "463735f0bc2bdfcde847aec9df48e8646fde5238"
+    },
+    {
+      "path": "src/ndef_type_media.cpp",
+      "gitBlob": "ec96cc3a95941b64aaaf0a941a0d6ccc76dde775"
+    },
+    {
+      "path": "src/ndef_type_media.h",
+      "gitBlob": "f07150b3a745b27515e95e90051e7ada96d01d02"
+    },
+    {
+      "path": "src/ndef_type_text.cpp",
+      "gitBlob": "dfbc42bc06d0fef347e10050606c5927c813a61f"
+    },
+    {
+      "path": "src/ndef_type_text.h",
+      "gitBlob": "82bd29fe20b07db36545ed7eb2aa44279cfe1a50"
+    },
+    {
+      "path": "src/ndef_type_tnep.cpp",
+      "gitBlob": "f6a2753fd2f1210c36df4fc438ee7171c14f15a4"
+    },
+    {
+      "path": "src/ndef_type_tnep.h",
+      "gitBlob": "5208a5d046d48fcf0d89ee4f4f24bb7c00162024"
+    },
+    {
+      "path": "src/ndef_type_uri.cpp",
+      "gitBlob": "8c6ec0220b05f92228e0979c84a01705d53dccfb"
+    },
+    {
+      "path": "src/ndef_type_uri.h",
+      "gitBlob": "f99858e8898794cb823fff2718d4123753a4a534"
+    },
+    {
+      "path": "src/ndef_type_vcard.cpp",
+      "gitBlob": "6e5d84f8918f7e9aa4adf72d7d9406b0cf8f2456"
+    },
+    {
+      "path": "src/ndef_type_vcard.h",
+      "gitBlob": "c57718206a4b5c4301b9deda37ae0cbf91776ec8"
+    },
+    {
+      "path": "src/ndef_type_wifi.cpp",
+      "gitBlob": "cf6dc080f2c95a94fee4aef372711c79d4b35019"
+    },
+    {
+      "path": "src/ndef_type_wifi.h",
+      "gitBlob": "a0425cdee79baed3a610a77c455c9da4ed8a6003"
+    },
+    {
+      "path": "src/ndef_type_wlc.cpp",
+      "gitBlob": "841806f9232dc9ae0d87431910e91f189cf309b3"
+    },
+    {
+      "path": "src/ndef_type_wlc.h",
+      "gitBlob": "89e64689bd295c10e30893a6cc3d5e84c78226f5"
+    },
+    {
+      "path": "src/ndef_type_wpcwlc.cpp",
+      "gitBlob": "25913ac31c8d12f07f82da0bebcfa269a918258a"
+    },
+    {
+      "path": "src/ndef_type_wpcwlc.h",
+      "gitBlob": "3c045dc08ab1d0a5d47c67f808b3c1aa8ce015ce"
+    },
+    {
+      "path": "src/ndef_types.cpp",
+      "gitBlob": "2eff7f11f01e27ad04d2ff34daf1dab5e41674d9"
+    },
+    {
+      "path": "src/ndef_types.h",
+      "gitBlob": "34b826508620da333a8a699b2c21787f33596d67"
+    },
+    {
+      "path": "src/nfc_utils.h",
+      "gitBlob": "616d3ea45cb82546267c6d9530631d2f9d95df37"
+    },
+    {
+      "path": "src/rfal_config.h",
+      "gitBlob": "411a3c223dfed18323ca1ac423c539c9c3310c1b"
+    },
+    {
+      "path": "src/rfal_default_config.h",
+      "gitBlob": "95cffb59f53d6b7f6951d9e483a456e1ad0f8201"
+    },
+    {
+      "path": "src/rfal_isoDep.cpp",
+      "gitBlob": "fdd86e8b794f6d34087f718ec086e74218f44b15"
+    },
+    {
+      "path": "src/rfal_isoDep.h",
+      "gitBlob": "7203a63cf7d105860dc77bd8a78e37f90979bb23"
+    },
+    {
+      "path": "src/rfal_nfc.cpp",
+      "gitBlob": "3f9d0b4950e5f259c0acddf9817209158e103c5e"
+    },
+    {
+      "path": "src/rfal_nfc.h",
+      "gitBlob": "8bd607120549da1679f9324aeb4fbab1b5b9fba0"
+    },
+    {
+      "path": "src/rfal_nfcDep.cpp",
+      "gitBlob": "1e431947e53838651021ba2283e3cb5c7fdaaaab"
+    },
+    {
+      "path": "src/rfal_nfcDep.h",
+      "gitBlob": "3f1c3184ebe7e76843dd2f47df652a299b56d93e"
+    },
+    {
+      "path": "src/rfal_nfca.cpp",
+      "gitBlob": "d5a4ca8f66bd5b022f82280e6d6ecd17562f802e"
+    },
+    {
+      "path": "src/rfal_nfca.h",
+      "gitBlob": "975e10647f238acb09563a4710113381f533696a"
+    },
+    {
+      "path": "src/rfal_nfcb.cpp",
+      "gitBlob": "955446f7e1f6358d12f7094474921cd5aa0e4fd2"
+    },
+    {
+      "path": "src/rfal_nfcb.h",
+      "gitBlob": "12c97789ec9c78f1def35ae0dba0c0e7def510ea"
+    },
+    {
+      "path": "src/rfal_nfcf.cpp",
+      "gitBlob": "ccb75ab366a884e2b100a33c29f2c9d65165222d"
+    },
+    {
+      "path": "src/rfal_nfcf.h",
+      "gitBlob": "100aad19c3d174b73162e2ed2b3d90368b621e79"
+    },
+    {
+      "path": "src/rfal_nfcv.cpp",
+      "gitBlob": "c39f9db2679f346d4d3704bd96930835c229fcd2"
+    },
+    {
+      "path": "src/rfal_nfcv.h",
+      "gitBlob": "1dfdd81e95f58833a866669516458b295205f5e4"
+    },
+    {
+      "path": "src/rfal_rf.h",
+      "gitBlob": "8a0b1507521a0a0841cb55cb49074bade528e87f"
+    },
+    {
+      "path": "src/rfal_st25tb.cpp",
+      "gitBlob": "86251dc51e914e2706d51f1d1b304f132c5fd1d0"
+    },
+    {
+      "path": "src/rfal_st25tb.h",
+      "gitBlob": "815e138b78432fe5f89d54afbcce8062f523b7c1"
+    },
+    {
+      "path": "src/rfal_st25xv.cpp",
+      "gitBlob": "4fd4a30bfe81202ac8c3659b2f5275b17eb9c1fd"
+    },
+    {
+      "path": "src/rfal_st25xv.h",
+      "gitBlob": "4984bb59db552c7a74de3e9ed28e4094e0c66531"
+    },
+    {
+      "path": "src/rfal_t1t.cpp",
+      "gitBlob": "32ab1b5a919244a2672163ef842f403751ca2458"
+    },
+    {
+      "path": "src/rfal_t1t.h",
+      "gitBlob": "94e503e6d07b8baaa9a9f91d14215d0ff1167928"
+    },
+    {
+      "path": "src/rfal_t2t.cpp",
+      "gitBlob": "76a30d06e44cea8e073782f8a293f43f43fc5bda"
+    },
+    {
+      "path": "src/rfal_t2t.h",
+      "gitBlob": "1ee959b2475fb9e5ff9dff63641b432ae3244ead"
+    },
+    {
+      "path": "src/rfal_t4t.cpp",
+      "gitBlob": "4d1221f022fdc57ea5cc746a9d44e31747922223"
+    },
+    {
+      "path": "src/rfal_t4t.h",
+      "gitBlob": "3ed34771fe92affd8f6830576a164f1491ed796c"
+    },
+    {
+      "path": "src/st_errno.h",
+      "gitBlob": "c260e0a531f8d74b33660d341f33b4d83618bf39"
+    }
+  ]
+}

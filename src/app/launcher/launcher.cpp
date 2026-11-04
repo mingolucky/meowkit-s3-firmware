@@ -387,44 +387,45 @@ void Launcher::onLoop()
         delay(next_ms);
     } else {
         /* ── APP state: LVGL disabled, only mooncake + buttons ── */
-        /* Drive LED animation while an app is running. */
-        _device->led.update();
-        /* Keep sleep timer alive while an app is open — user is actively using device. */
-        power_reset_sleep_timer();
-        _device->button.update(); /* read GPIO (apps use LVGL indev instead) */
-        _update_system_key_sound(_device);
-        _device->button.tick();   /* must tick for long-press B detection */
-
-        /* Long-press B → exit app, return to persistent UI */
-        if (_device->button.B.isLongPress()) {
-            Serial.printf("[Launcher] Long-press B — closing app %d\n",
-                          _running_app_id);
-
-            /* 1. Request close (sets state → StateGoClose) */
-            /* An LVGL app owns its root screen. Its onClose() may delete
-             * it, so make the persistent menu active before cleanup.
-             * Deleting the active LVGL root screen can corrupt LVGL state
-             * and trigger a watchdog reset. */
-            if (ui_apps_menu && lv_scr_act() != ui_apps_menu) {
-                lv_disp_load_scr(ui_apps_menu);
-                lv_obj_invalidate(ui_apps_menu);
-                lv_timer_handler();
-            }
-
-            _mooncake.closeApp(_running_app_id);
-            /* 2. Drive state machine so onClose() actually executes */
-            _mooncake.update();
-
-            _running_app_id = -1;
-            _app_running    = false;
-
-            /* 3. Return to persistent UI (no rebuild needed) */
-            returnToUI();
-            return;
-        }
-
-        _mooncake.update();
+        updateRunningApp();
     }
+}
+
+void Launcher::updateRunningApp()
+{
+    _device->led.update();
+    power_reset_sleep_timer();
+    _device->button.update();
+    _update_system_key_sound(_device);
+    _device->button.tick();
+
+    if (_device->button.B.isLongPress() ||
+        _mooncake.getAppCurrentState(_running_app_id) == mooncake::AppAbility::StateGoClose) {
+        closeRunningApp();
+        return;
+    }
+
+    _mooncake.update();
+    // A short B press can make an app call close() from onRunning(). Finish
+    // that request now, rather than leaving the launcher in its APP state.
+    if (_mooncake.getAppCurrentState(_running_app_id) == mooncake::AppAbility::StateGoClose)
+        closeRunningApp();
+}
+
+void Launcher::closeRunningApp()
+{
+    // Both app-requested exits and long B use the same cleanup sequence.
+    // An LVGL app may delete its own screen in onClose(), so switch first.
+    if (ui_apps_menu && lv_scr_act() != ui_apps_menu) {
+        lv_disp_load_scr(ui_apps_menu);
+        lv_obj_invalidate(ui_apps_menu);
+        lv_timer_handler();
+    }
+    _mooncake.closeApp(_running_app_id);
+    _mooncake.update();
+    _running_app_id = -1;
+    _app_running = false;
+    returnToUI();
 }
 
 /* ── SD card ───────────────────────────────────────── */

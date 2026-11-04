@@ -1,0 +1,7 @@
+{
+  "name": "MomentumInfrared",
+  "version": "1.0.0",
+  "description": "Momentum/Flipper infrared codecs with a portable MeowKit adapter",
+  "license": "GPL-3.0-only",
+  "build": {"includeDir": "src", "srcDir": "src"}
+}

@@ -13,9 +13,11 @@
  */
 #include "badusb.h"
 #include "badusb_parse_utils.h"
+#ifndef BADUSB_HOST_TEST
 #include "../app_common/hp_ui.h"
 #include <SD_MMC.h>
 #include <FS.h>
+#endif
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
@@ -24,66 +26,9 @@ static inline bool _hidConnected() { return usb_hid_connected() != 0; }
 
 /* BLE HID - isolated wrapper avoids header collisions with USBHIDKeyboard. */
 #include "badusb_ble.h"
+#ifndef BADUSB_HOST_TEST
 #include "../../system/bluetooth_manager.h"
-
-/* ================================================================ */
-/*  LVGL number fonts  (read-only flash data, safe from any core)
- * ================================================================ */
-extern "C" {
-#include <lvgl.h>
-extern const lv_font_t ui_font_number_60;  /* 42 px line height, digits + ./:  */
-extern const lv_font_t ui_font_number_24;  /* 23 px line height, full ASCII     */
-}
-
-/* ── LVGL 4-bpp glyph renderer via LovyanGFX ──────────────────────
- * Measures advance width of a string in the given LVGL font (pixels). */
-static int32_t lvglStrW(const lv_font_t* font, const char* s)
-{
-    int32_t w = 0;
-    while (*s) {
-        lv_font_glyph_dsc_t g;
-        if (lv_font_get_glyph_dsc(font, &g, (uint32_t)(unsigned char)*s, 0))
-            w += (int32_t)g.adv_w;
-        ++s;
-    }
-    return w;
-}
-
-/* Draw string using LVGL font through LovyanGFX pixel-level API.
- * x, y = top-left of text line (LVGL convention).
- * Threshold: draw pixel when 4-bpp alpha nibble >= 8 (≥50% coverage). */
-static void lvglDrawStr(LovyanGFX& lcd, int x, int y,
-                        const lv_font_t* font, const char* s,
-                        uint16_t color)
-{
-    const int lh = (int)font->line_height;
-    const int bl = (int)font->base_line;
-    int px = x;
-    while (*s) {
-        uint32_t cp = (uint32_t)(unsigned char)*s++;
-        lv_font_glyph_dsc_t g;
-        if (!lv_font_get_glyph_dsc(font, &g, cp, 0)) continue;
-
-        const uint8_t* bmp = lv_font_get_glyph_bitmap(font, cp);
-        if (bmp && g.box_w > 0 && g.box_h > 0) {
-            /* Glyph top-left in screen coords:
-             *   gy = y + (line_height - base_line) - ofs_y - box_h  */
-            int gx = px + (int)g.ofs_x;
-            int gy = y  + (lh - bl) - (int)g.ofs_y - (int)g.box_h;
-            for (int row = 0; row < (int)g.box_h; ++row) {
-                for (int col = 0; col < (int)g.box_w; ++col) {
-                    int idx = row * (int)g.box_w + col;
-                    uint8_t nibble = (idx & 1)
-                        ? (bmp[idx >> 1] & 0x0F)
-                        : ((bmp[idx >> 1] >> 4) & 0x0F);
-                    if (nibble >= 8)
-                        lcd.drawPixel(gx + col, gy + row, color);
-                }
-            }
-        }
-        px += (int)g.adv_w;
-    }
-}
+#endif
 
 /* ================================================================ */
 /*  Embedded PNG status icons  (140×50 px, <512 bytes each)
@@ -424,7 +369,10 @@ void AppBadUSB::onOpen()
     usb_manager_request(USB_MODE_HID);
     _scanScripts();
     _scanLayouts();
-    _loadLayout(_layoutName.c_str());
+    if (!_loadLayout(_layoutName.c_str())) {
+        _layoutLoaded = false;
+        _layoutName = "en-US";
+    }
     _switchPage(BuPage::FileList);
 }
 
@@ -448,6 +396,8 @@ void AppBadUSB::onRunning()
         }
     }
 
+    if (_handlePairing()) return;
+
     switch (_page) {
         case BuPage::FileList: _runFileList();    break;
         case BuPage::Layouts:  _runLayouts();     break;
@@ -457,6 +407,7 @@ void AppBadUSB::onRunning()
 
 void AppBadUSB::onClose()
 {
+    bu_ble_set_wait_callback(nullptr,nullptr);
     _stopExec();
     usb_manager_release(USB_MODE_HID);
     if (_bleStarted) {
@@ -473,13 +424,55 @@ bool AppBadUSB::_isConnected() const
     return (_mode == BuMode::BLE) ? _bleConnected() : _hidConnected();
 }
 
+bool AppBadUSB::_isExecuting() const
+{
+    return _execState == ExecState::Running || _execState == ExecState::Delay ||
+        _execState == ExecState::StringDelay || _execState == ExecState::WaitButton ||
+        _execState == ExecState::Paused || _execState == ExecState::Finishing;
+}
+
+void AppBadUSB::_switchMode()
+{
+    _stopExec(); // Release the old transport before changing it.
+    if (_mode == BuMode::BLE) { bu_ble_end(); _bleStarted = false; }
+    _mode = _mode == BuMode::USB ? BuMode::BLE : BuMode::USB;
+    _errMsg.clear();
+    _errLine = 0;
+    _execStartTime = _execEndTime = 0;
+    _execState = ExecState::WaitConnect;
+    _sceneDirty = true;
+}
+
 /* --- BLE keyboard helpers --- */
 void AppBadUSB::_bleBegin()
 {
     if (!_bleStarted) {
         _bleStarted = bu_ble_begin();
+        if (_bleStarted) bu_ble_set_wait_callback([](void* context) {
+            return static_cast<AppBadUSB*>(context)->_onBleWait();
+        },this);
         Serial.println(_bleStarted ? "[BadUSB] BLE starting" : "[BadUSB] BLE unavailable; check Settings");
     }
+}
+
+bool AppBadUSB::_onBleWait()
+{
+    _device->button.update();_device->button.tick();
+    if (_device->button.B.pressed()) { _bleStopRequested=_bleBackRequested=true;return false; }
+    if (_device->button.A.pressed()) { _bleStopRequested=true;return false; }
+    if (millis()-_lastDraw>=100) { _drawRunningDynamic();_lastDraw=millis(); }
+    return true;
+}
+bool AppBadUSB::_handleBleCancel()
+{
+    if (!_bleStopRequested) return false;
+    const bool back=_bleBackRequested;
+    _bleStopRequested=_bleBackRequested=false;
+    _finishExec(ExecState::Stopped);_txFault=false;
+    if (_mode==BuMode::BLE && bu_ble_requires_reconnect()) bu_ble_reconnect();
+    if (back) _switchPage(BuPage::FileList);
+    else _drawRunningDynamic();
+    return true;
 }
 
 bool AppBadUSB::_bleConnected() const
@@ -487,18 +480,56 @@ bool AppBadUSB::_bleConnected() const
     return _bleStarted && bu_ble_connected();
 }
 
+bool AppBadUSB::_handlePairing()
+{
+    const auto pin=_bleStarted ? bu_ble_pairing() : BuBlePin{BuBlePairing::None,0};
+    if (pin.mode==BuBlePairing::None) {
+        if (_shownPairing!=BuBlePairing::None) {
+            _shownPairing=BuBlePairing::None;
+            _sceneDirty=true;
+            return true;
+        }
+        return false;
+    }
+    if (_isExecuting()) _finishExec(ExecState::Stopped);
+    auto& lcd=_device->Lcd;
+    if (pin.mode!=_shownPairing || pin.value!=_shownPin) {
+        _shownPairing=pin.mode;_shownPin=pin.value;
+        hp::drawChrome(lcd);
+        lcd.setTextSize(1);
+        hp::drawHeader(lcd,"Bluetooth pairing");
+        hp::clearContent(lcd);
+        lcd.setTextColor(BU_FG,BU_BG);
+        lcd.setCursor(8,52);
+        lcd.print(pin.mode==BuBlePairing::Compare ? "Compare PIN with your PC" : "Enter this PIN on your PC");
+        lcd.setTextSize(3);
+        lcd.setCursor(88,88);
+        lcd.printf("%06lu",static_cast<unsigned long>(pin.value));
+        lcd.setTextSize(1);
+        lcd.setCursor(8,156);
+        lcd.print(pin.mode==BuBlePairing::Compare ? "Match: A    Different: B" : "Waiting for PC confirmation");
+        _drawFooterBright3("",pin.mode==BuBlePairing::Compare?"[A]Confirm":"[A]--","[B]Cancel");
+        // A key that opened the script must never also approve a new PIN.
+        _device->button.A.pressed();_device->button.B.pressed();
+        return true;
+    }
+    if (_device->button.B.pressed()) bu_ble_pairing_reply(false);
+    else if (_device->button.A.pressed() && pin.mode==BuBlePairing::Compare) bu_ble_pairing_reply(true);
+    return true;
+}
+
 /* --- Keyboard layout loader (Momentum .kl: 128 - uint16_le) --- */
 bool AppBadUSB::_loadLayout(const char* name)
 {
-    _layoutLoaded = false;
     if (!name || !*name) return false;
     char path[64];
-    snprintf(path, sizeof(path), "%s/%s.kl", LAYOUT_DIR, name);
+    if (snprintf(path, sizeof(path), "%s/%s.kl", LAYOUT_DIR, name) >= int(sizeof(path))) return false;
     File f = SD_MMC.open(path, FILE_READ);
     if (!f) {
         Serial.printf("[BadUSB] Layout not found: %s\n", path);
         return false;
     }
+    if (f.size() != 256) { f.close(); return false; }
     uint8_t buf[256];
     size_t n = f.read(buf, sizeof(buf));
     f.close();
@@ -644,8 +675,7 @@ void AppBadUSB::_runFileList()
 {
     /* [Left] / [Right] toggle USB ↔ BLE transport mode. */
     if (_device->button.Left.pressed() || _device->button.Right.pressed()) {
-        _mode = (_mode == BuMode::USB) ? BuMode::BLE : BuMode::USB;
-        if (_mode == BuMode::USB) { bu_ble_end(); _bleStarted=false; }
+        _switchMode();
         const char* modeLabel = (_mode == BuMode::BLE) ? "[<>]BLE" : "[<>]USB";
         _drawFooterBright3(modeLabel, "[A]Enter", "[B]Exit");
         return;
@@ -710,281 +740,181 @@ void AppBadUSB::_runFileList()
     }
 }
 
-/* ================================================================ */
-/*  Running Page  - partial-refresh implementation (no full-screen wipe)
- *
- *  Layout (320×240, content area y=26..212):
- *
- *    Header   y=0..24    filename + state badge
- *    Clock    y=30       MM:SS.CS  ui_font_number_60 (42 px line, full-width)
- *    Sep      y=76
- *    Icon     x=90, y=82 PNG 140×50 (connected / unconnected)
- *    Status   x=right, y=82  mode + connection label
- *    Pct      x=right, y=100 XX%  ui_font_number_24 (23 px)
- *    Counter  x=right, y=126 XX/YY efontCN_16 ×1
- *    Layout   y=138     centered dim label
- *    Bar      y=156..168 progress bar (height 12)
- *    Footer   y=215..239
- * ================================================================ */
+/* Execution view: file, layout/transport, connection/state, progress, time.
+ * Fixed non-overlapping rows; repaint only changed values, no per-frame sprites. */
 void AppBadUSB::_enterRunning()
 {
-    /* Start BLE advertising if that mode is selected. */
     if (_mode == BuMode::BLE) {
         _bleBegin();
         if (!_bleStarted) {
-            _errMsg=bluetooth_manager::enabled() ? "Bluetooth busy/error" : "Enable Bluetooth in Settings";
-            _execState=ExecState::Error;
+            _errMsg = bluetooth_manager::enabled() ? "Bluetooth busy/error" : "Enable Bluetooth in Settings";
+            _errLine = 0;
+            _execState = ExecState::Error;
         }
     }
-
-    /* Invalidate all dynamic caches so first dynamic pass repaints everything. */
-    _lastClkMs      = 0xFFFFFFFFul;
-    _lastPctInt     = -1;
-    _lastLineIdx    = (size_t)-1;
+    _lastClkMs = 0xFFFFFFFFul;
+    _lastPctInt = -1;
+    _lastLineIdx = (size_t)-1;
     _lastDrawnState = ExecState::Idle;
-    _lastDrawnMode  = (BuMode)0xFF;
-    _lastConnected  = !_isConnected();  /* force repaint */
-    _lastDraw       = 0;
-    _bleReadyAt     = 0;
+    _lastDrawnMode = (BuMode)0xFF;
+    _lastConnected = !_isConnected();
+    _lastDraw = 0;
     _drawRunningStatic();
     _drawRunningDynamic();
 }
 
-/* Draw the static chrome + fixed labels once on page enter. */
 void AppBadUSB::_drawRunningStatic()
 {
-    auto& Lcd = _device->Lcd;
-
-    hp::drawChrome(Lcd);
-
-    const char* fname = strrchr(_selectedFile.c_str(), '/');
-    fname = fname ? fname + 1 : _selectedFile.c_str();
-    hp::drawHeader(Lcd, fname);
-    hp::clearContent(Lcd);
-
-    /* Layout label — static, bottom of content zone */
-    Lcd.setFont(&fonts::efontCN_16);
-    Lcd.setTextColor(BU_FG, BU_BG);
-    Lcd.setTextSize(1);
-    char lblBuf[40];
-    snprintf(lblBuf, sizeof(lblBuf), "layout: %s", _layoutName.c_str());
-    int lblW = (int)strlen(lblBuf) * 8;
-    Lcd.setCursor((SCR_W - lblW) / 2, 194);
-    Lcd.print(lblBuf);
+    auto& lcd = _device->Lcd;
+    hp::drawChrome(lcd);
+    const char* name = strrchr(_selectedFile.c_str(), '/');
+    name = name ? name + 1 : _selectedFile.c_str();
+    // Reserve the header brackets; long payload names never wrap into content.
+    std::string title(name);
+    if (title.size() > 33) {
+        size_t end = 30;
+        while (end && (uint8_t(title[end]) & 0xC0) == 0x80) --end;
+        title = title.substr(0, end) + "...";
+    }
+    lcd.setTextSize(1);
+    hp::drawHeader(lcd, title.c_str());
+    hp::clearContent(lcd);
+    lcd.setFont(&fonts::efontCN_16);
+    lcd.setTextColor(BU_FG, BU_BG);
+    lcd.setCursor(8, 32);
+    lcd.printf("(%.23s)", _layoutName.c_str());
+    lcd.setCursor(248, 32);
+    lcd.print(_mode == BuMode::BLE ? "[<>]BLE" : "[<>]USB");
 }
 
-/* Draw the PNG connection-status icon (140×50) in the left half of the icon zone. */
 void AppBadUSB::_drawConnIcon(bool connected)
 {
-    auto& Lcd = _device->Lcd;
-    Lcd.fillRect(8, 108, 150, 52, BU_BG);
-    if (connected)
-        Lcd.drawPng(kIconConnected,   kIconConnectedLen,   8, 110);
-    else
-        Lcd.drawPng(kIconUnconnected, kIconUnconnectedLen, 8, 110);
+    auto& lcd = _device->Lcd;
+    lcd.fillRect(8, 62, 148, 58, BU_BG);
+    if (_mode == BuMode::USB) {
+        lcd.drawPng(connected ? kIconConnected : kIconUnconnected,
+                    connected ? kIconConnectedLen : kIconUnconnectedLen, 8, 66);
+        return;
+    }
+    // Bluetooth rune and dotted wireless link, using the existing TUI palette.
+    const uint16_t color = connected ? BU_FG : BU_FG_DIM;
+    for (int dx = -1; dx <= 1; ++dx) {
+        lcd.drawLine(78+dx, 65, 78+dx, 111, color);
+        lcd.drawLine(78+dx, 65, 96+dx, 79, color);
+        lcd.drawLine(96+dx, 79, 60+dx, 101, color);
+        lcd.drawLine(60+dx, 75, 96+dx, 97, color);
+        lcd.drawLine(96+dx, 97, 78+dx, 111, color);
+    }
+    for (int x = 108; x < 140; x += 9) lcd.fillCircle(x, 89, 1, color);
+    if (connected) {
+        lcd.drawLine(134, 85, 139, 89, color);
+        lcd.drawLine(139, 89, 134, 93, color);
+    }
 }
 
-/* State badge — top of content zone (y=26..58), wide pill, immediately visible.
- * Rendered into a sprite first so the push is atomic and flicker-free. */
 void AppBadUSB::_drawStateBadge()
 {
-    auto& Lcd = _device->Lcd;
-    const char* stStr = "";
-    uint16_t    stCol = BU_FG;
+    auto& lcd = _device->Lcd;
+    const char* title = "Ready";
+    const char* detail = "Press A to run";
+    uint16_t color = BU_FG;
     switch (_execState) {
-    case ExecState::Idle:        stStr = "IDLE";   stCol = BU_FG;     break;
-    case ExecState::WaitConnect: stStr = "WAIT";   stCol = 0xFFE0;    break;
-    case ExecState::Ready:       stStr = "READY";  stCol = BU_ACCENT; break;
-    case ExecState::Running:     stStr = "RUN";    stCol = BU_FG;     break;
-    case ExecState::Paused:      stStr = "PAUSE";  stCol = 0xFFE0;    break;
-    case ExecState::Delay:       stStr = "DELAY";  stCol = 0xFFE0;    break;
-    case ExecState::StringDelay: stStr = "TYPE";   stCol = 0x07FF;    break;
-    case ExecState::WaitButton:  stStr = "WAIT A"; stCol = 0xFD20;    break;
-    case ExecState::Done:        stStr = "DONE";   stCol = BU_ACCENT; break;
-    case ExecState::Error:       stStr = "ERROR";  stCol = TFT_RED;   break;
+    case ExecState::WaitConnect:
+        title = "Connect";
+        detail = _mode == BuMode::BLE ? "Pair Bluetooth" : "USB data cable";
+        color = hp::COL_WARN; break;
+    case ExecState::Running: title = "Running"; detail = "Sending keys"; break;
+    case ExecState::Delay: title = "Delay"; detail = "Script delay"; color = hp::COL_WARN; break;
+    case ExecState::StringDelay: title = "Typing"; detail = "Sending text"; break;
+    case ExecState::WaitButton: title = "Wait A"; detail = "A to continue"; color = hp::COL_WARN; break;
+    case ExecState::Paused: title = "Paused"; detail = "A to stop"; color = hp::COL_WARN; break;
+    case ExecState::Done: title = "Done"; detail = "Script complete"; break;
+    case ExecState::Finishing: title = "Finishing";detail="Waiting for HID";break;
+    case ExecState::Stopped: title = "Stopped"; detail = "A to restart"; color = hp::COL_WARN; break;
+    case ExecState::Error: title = "Error"; detail = "See details below"; color = hp::COL_ERR; break;
+    default: break;
     }
-
-    int tw = (int)strlen(stStr) * 8;
-    int bw = (tw + 40 < 240) ? 240 : (tw + 40);
-    int bx = (SCR_W - bw) / 2;
-    uint16_t txt = (stCol == BU_FG || stCol == BU_ACCENT || stCol == 0xFFE0)
-                   ? BU_BG : BU_ACCENT;
-
-    /* Sprite spans the full badge row (y=26..58 = 32 px). */
-    LGFX_Sprite spr(&Lcd);
-    spr.setColorDepth(16);
-    if (spr.createSprite(SCR_W - 2, 32)) {
-        spr.fillSprite(BU_BG);
-        /* sprite origin = screen (1, 26); badge top in sprite = 30-26 = 4 */
-        int sbx = bx - 1;
-        spr.fillRoundRect(sbx, 4, bw, 24, 4, stCol);
-        spr.setFont(&fonts::efontCN_16);
-        spr.setTextColor(txt, stCol);
-        spr.setTextSize(1);
-        spr.setCursor(sbx + (bw - tw) / 2, 6);
-        spr.print(stStr);
-        spr.pushSprite(1, 26);
-        spr.deleteSprite();
-    } else {
-        Lcd.fillRect(1, 26, SCR_W - 2, 32, BU_BG);
-        Lcd.fillRoundRect(bx, 30, bw, 24, 4, stCol);
-        Lcd.setFont(&fonts::efontCN_16);
-        Lcd.setTextColor(txt, stCol);
-        Lcd.setTextSize(1);
-        Lcd.setCursor(bx + (bw - tw) / 2, 32);
-        Lcd.print(stStr);
+    if (_mode==BuMode::BLE && bu_ble_recovering()) {
+        title="Waiting";detail="BLE busy / A Stop";color=hp::COL_WARN;
     }
+    lcd.fillRect(160, 62, 152, 58, BU_BG);
+    lcd.setFont(&fonts::efontCN_16);
+    lcd.setTextColor(color, BU_BG);
+    lcd.setTextSize(2);
+    lcd.setCursor(164, 64);
+    lcd.print(title);
+    lcd.setTextSize(1);
+    lcd.setCursor(164, 101);
+    lcd.print(detail);
 }
 
-/* Footer hints depending on current state. Order is always [Dir]/[A]/[B].
- * [Dir]=Config (open Layouts), [A]=Run/Stop/Run-again, [B]=Back to list. */
 void AppBadUSB::_drawRunningFooter()
 {
-    const char* a = "";
-    switch (_execState) {
-    case ExecState::WaitConnect: a = "[A]----"; break; /* not connected yet */
-    case ExecState::Ready:       a = "[A]Run";  break;
-    case ExecState::Running:
-    case ExecState::Delay:
-    case ExecState::StringDelay:
-    case ExecState::WaitButton:
-    case ExecState::Paused:      a = "[A]Stop"; break;
-    case ExecState::Done:
-    case ExecState::Error:       a = "[A]Run";  break; /* re-run from start */
-    default:                     a = "[A]----"; break;
-    }
-    _drawFooterBright3("[^v]Config", a, "[B]Back");
+    const char* action = "[A]Run";
+    if (_execState == ExecState::WaitConnect) action = "[A]--";
+    else if (_execState == ExecState::Error) action = "[A]Retry";
+    else if (_execState == ExecState::WaitButton) action = "[A]Next";
+    else if (_isExecuting()) action = "[A]Stop";
+    _drawFooterBright3(_isExecuting() ? "[^v]--" : "[^v]Layout", action, "[B]Back");
 }
 
-/* Repaint only the values that have changed since the last call.
- * Caller invokes this each frame (~20-50 ms); cheap when nothing changed. */
 void AppBadUSB::_drawRunningDynamic()
 {
-    auto& Lcd = _device->Lcd;
-
-    /* --- Header badge (state changes) --- */
-    if (_execState != _lastDrawnState) {
+    auto& lcd = _device->Lcd;
+    const bool connected = _isConnected();
+    const bool recovery=_mode==BuMode::BLE && bu_ble_recovering();
+    const bool stateChanged = _execState != _lastDrawnState || recovery!=_lastRecovering;
+    const bool linkChanged = connected != _lastConnected || _mode != _lastDrawnMode;
+    if (stateChanged || linkChanged) {
+        _drawConnIcon(connected);
         _drawStateBadge();
         _drawRunningFooter();
+        lcd.fillRect(4, 176, 312, 34, BU_BG);
+        lcd.setFont(&fonts::efontCN_16);
+        lcd.setTextColor(_execState == ExecState::Error ? hp::COL_ERR : BU_FG_DIM, BU_BG);
+        lcd.setCursor(8, 177);
         if (_execState == ExecState::Error) {
-            Lcd.fillRect(2,192,316,20,BU_BG);
-            Lcd.setFont(&fonts::efontCN_16);
-            Lcd.setTextColor(TFT_RED,BU_BG);
-            Lcd.setCursor(4,194);
-            Lcd.printf("L%u: %.32s", unsigned(_errLine), _errMsg.c_str());
-        } else if (_lastDrawnState == ExecState::Error) {
-            // Restore the layout label after leaving ERROR; don't leave stale text.
-            Lcd.fillRect(2,192,316,20,BU_BG);
-            Lcd.setFont(&fonts::efontCN_16);
-            Lcd.setTextColor(BU_FG,BU_BG);
-            char label[40];
-            snprintf(label, sizeof(label), "layout: %s", _layoutName.c_str());
-            Lcd.setCursor((SCR_W - int(strlen(label)) * 8) / 2, 194);
-            Lcd.print(label);
+            std::string error = _errLine ? "L" + std::to_string(_errLine) + ": " + _errMsg : _errMsg;
+            lcd.print(error.substr(0, 38).c_str());
+            lcd.setCursor(8, 194);
+            lcd.print(error.substr(std::min(size_t(38), error.size()), 38).c_str());
+        } else if (_mode == BuMode::BLE && _execState == ExecState::WaitConnect) {
+            lcd.setTextColor(BU_FG, BU_BG);
+            lcd.print("Pair: MeowKit BadUSB");
         }
         _lastDrawnState = _execState;
-    }
-
-    /* --- Connection icon (left) + mode/status text (right) --- */
-    bool conn = _isConnected();
-    if (conn != _lastConnected || _mode != _lastDrawnMode) {
-        _drawConnIcon(conn);
-
-        /* Right half of icon zone: x=158..316 (160px wide), y=108..162 */
-        const int RH_X0 = 158, RH_W = SCR_W - RH_X0 - 4;
-        Lcd.fillRect(RH_X0, 108, RH_W, 54, BU_BG);
-        Lcd.setFont(&fonts::efontCN_16);
-        Lcd.setTextSize(1);
-
-        /* Mode badge (row 1) */
-        const char* modeStr = (_mode == BuMode::BLE) ? "BLE" : "USB";
-        int modeW = (int)strlen(modeStr) * 8;
-        Lcd.setTextColor(BU_ACCENT, BU_BG);
-        Lcd.setCursor(RH_X0 + (RH_W - modeW) / 2, 120);
-        Lcd.print(modeStr);
-
-        /* Connection status (row 2) */
-        const char* connStr = conn ? "Connected" : "Waiting...";
-        uint16_t connCol = conn ? BU_ACCENT : 0xFFE0;
-        int connW = (int)strlen(connStr) * 8;
-        Lcd.setTextColor(connCol, BU_BG);
-        Lcd.setCursor(RH_X0 + (RH_W - connW) / 2, 140);
-        Lcd.print(connStr);
-
-        _lastConnected = conn;
+        _lastRecovering=recovery;
         _lastDrawnMode = _mode;
+        _lastConnected = connected;
     }
 
-    /* --- Clock MM:SS.CS with ui_font_number_60 ---
-     * lvglDrawStr draws pixel-by-pixel; sprite buffers the whole render
-     * so pushSprite delivers it in one DMA blast — eliminates flicker. */
-    unsigned long elapsed;
-    if (_execStartTime == 0) {
-        elapsed = 0;
-    } else if (_execEndTime != 0) {
-        elapsed = _execEndTime - _execStartTime;
-    } else {
-        elapsed = millis() - _execStartTime;
+    // A dispatched line is not complete while its text/delay/wait is pending.
+    size_t complete = std::min(_lineIdx, _lines.size());
+    if (_execState != ExecState::Done && complete > 0 &&
+        (_isExecuting() || _execState == ExecState::Error || _execState == ExecState::Stopped)) --complete;
+    const int percent = _execState == ExecState::Done ? 100 :
+        (_lines.empty() ? 0 : int(complete * 100 / _lines.size()));
+    if (percent != _lastPctInt || complete != _lastLineIdx) {
+        lcd.fillRect(8, 132, 304, 8, BU_FG_DIM);
+        if (percent) lcd.fillRect(8, 132, 304 * percent / 100, 8, BU_FG);
+        lcd.fillRect(8, 150, 192, 18, BU_BG);
+        lcd.setFont(&fonts::efontCN_16);
+        lcd.setTextColor(BU_FG, BU_BG);
+        lcd.setCursor(8, 150);
+        lcd.printf("%d%%  %u/%u", percent, unsigned(complete), unsigned(_lines.size()));
+        _lastPctInt = percent;
+        _lastLineIdx = complete;
     }
-    unsigned long elapsedTick = elapsed / 10;
-    if (elapsedTick != _lastClkMs) {
-        unsigned int mins = (elapsed / 60000) % 60;
-        unsigned int secs = (elapsed /  1000) % 60;
-        unsigned int cs   = (elapsed /    10) % 100;
-        char clkBuf[12];
-        snprintf(clkBuf, sizeof(clkBuf), "%02u:%02u.%02u", mins, secs, cs);
-
-        LGFX_Sprite spr(&Lcd);
-        spr.setColorDepth(16);
-        if (spr.createSprite(SCR_W - 2, 46)) {
-            spr.fillSprite(BU_BG);
-            int32_t clkW = lvglStrW(&ui_font_number_60, clkBuf);
-            /* center in sprite; sprite origin = screen (1, 58); text y=2 → screen y=60 */
-            int clkSprX = ((SCR_W - 2) - (int)clkW) / 2;
-            lvglDrawStr(spr, clkSprX, 2, &ui_font_number_60, clkBuf, BU_ACCENT);
-            spr.pushSprite(1, 58);
-            spr.deleteSprite();
-        } else {
-            Lcd.fillRect(1, 58, SCR_W - 2, 46, BU_BG);
-            int32_t clkW = lvglStrW(&ui_font_number_60, clkBuf);
-            int clkX = (SCR_W - (int)clkW) / 2;
-            lvglDrawStr(Lcd, clkX, 60, &ui_font_number_60, clkBuf, BU_ACCENT);
-        }
-        _lastClkMs = elapsedTick;
-    }
-
-    /* --- Progress row: % (left half) + line counter (right half) ---
-     * Both depend on _lineIdx so they always change together; update in one block. */
-    float pct = _lines.empty() ? 0.0f
-                               : (float)_lineIdx / (float)_lines.size();
-    int pctInt = (int)(pct * 100.0f + 0.5f);
-    if (pctInt != _lastPctInt || _lineIdx != _lastLineIdx) {
-        Lcd.fillRect(1, 162, SCR_W - 2, 28, BU_BG);
-
-        /* Left half (x=1..158): percentage with ui_font_number_24 */
-        char numBuf[8];
-        snprintf(numBuf, sizeof(numBuf), "%d", pctInt);
-        int32_t numW = lvglStrW(&ui_font_number_24, numBuf);
-        const int LH_W = 158;
-        int pctX = 1 + (LH_W - (int)numW - 8) / 2;
-        lvglDrawStr(Lcd, pctX, 164, &ui_font_number_24, numBuf, BU_FG);
-        Lcd.setFont(&fonts::efontCN_16);
-        Lcd.setTextColor(BU_FG, BU_BG);
-        Lcd.setTextSize(1);
-        Lcd.setCursor(pctX + (int)numW + 2, 171);
-        Lcd.print('%');
-
-        /* Right half (x=160..316): line counter */
-        char cntBuf[16];
-        snprintf(cntBuf, sizeof(cntBuf), "%d/%d",
-                 (int)_lineIdx, (int)_lines.size());
-        const int RH2_X0 = 160, RH2_W = SCR_W - RH2_X0 - 4;
-        int cntW = (int)strlen(cntBuf) * 8;
-        Lcd.setCursor(RH2_X0 + (RH2_W - cntW) / 2, 172);
-        Lcd.print(cntBuf);
-
-        _lastPctInt  = pctInt;
-        _lastLineIdx = _lineIdx;
+    const uint32_t elapsed = !_execStartTime ? 0 :
+        uint32_t((_execEndTime ? _execEndTime : millis()) - _execStartTime);
+    // Tenths are enough for a small display; no 30 KB clock sprite allocation.
+    if (elapsed / 100 != _lastClkMs) {
+        lcd.fillRect(216, 150, 96, 18, BU_BG);
+        lcd.setFont(&fonts::efontCN_16);
+        lcd.setTextColor(BU_FG, BU_BG);
+        lcd.setCursor(216, 150);
+        lcd.printf("%02u:%02u.%u", unsigned(elapsed / 60000), unsigned(elapsed / 1000 % 60), unsigned(elapsed / 100 % 10));
+        _lastClkMs = elapsed / 100;
     }
 }
 
@@ -993,40 +923,25 @@ void AppBadUSB::_drawRunningDynamic()
  * ================================================================ */
 void AppBadUSB::_updateRunning()
 {
-    if (_mode == BuMode::BLE) {
-        const bool executing=_execState==ExecState::Running || _execState==ExecState::Delay ||
-            _execState==ExecState::StringDelay || _execState==ExecState::WaitButton ||
-            _execState==ExecState::Paused;
-        if ((_bleStarted && bu_ble_failed()) || (executing && !_bleConnected())) {
-            _stopExec();
-            bu_ble_end(); _bleStarted=false;
-            _errMsg="Bluetooth stopped. Reopen script.";
-            _execState=ExecState::Error;
-        }
+    if (_handleBleCancel()) return;
+    const bool lostConnection=!_isConnected() && !(_mode==BuMode::BLE && bu_ble_session_alive());
+    if (_isExecuting() && (_txFault || lostConnection ||
+        (_mode == BuMode::BLE && bu_ble_failed()))) {
+        _transportError(_mode == BuMode::BLE ? bu_ble_error() : "USB transfer failed. Reconnect, Run.");
     }
-    if (_mode == BuMode::USB && !_isConnected()
-        && (_execState == ExecState::Running || _execState == ExecState::Delay
-            || _execState == ExecState::StringDelay || _execState == ExecState::WaitButton)) {
-        _stopExec();
-        _errMsg = "USB disconnected. Run again.";
-        _errLine = _lineIdx;
-        _execState = ExecState::Error;
+    if (_mode == BuMode::BLE && _bleStarted && bu_ble_failed() && !_isConnected() &&
+        (_execState==ExecState::WaitConnect || _execState==ExecState::Ready)) {
+        _transportError(bu_ble_error());
     }
     /* --- State-independent inputs --- */
-    /* Any direction key = enter Layouts (Config). If a script is actively
-     * running, stop it first (releases all keys) so we don't leave the host
-     * with stuck modifiers when the user reconfigures. */
-    if (_device->button.Up.pressed()    || _device->button.Down.pressed() ||
-        _device->button.Left.pressed()  || _device->button.Right.pressed()) {
-        if (_execState == ExecState::Running     ||
-            _execState == ExecState::Delay       ||
-            _execState == ExecState::StringDelay ||
-            _execState == ExecState::WaitButton  ||
-            _execState == ExecState::Paused) {
-            _kbdReleaseAll();
-            _execState   = ExecState::Done;
-            _execEndTime = millis();
-        }
+    const bool layoutPressed = _device->button.Up.pressed() || _device->button.Down.pressed();
+    const bool modePressed = _device->button.Left.pressed() || _device->button.Right.pressed();
+    // Editing layout/transport is available after stopping, never mid-report.
+    if (!_isExecuting() && modePressed) {
+        _switchMode();
+        return;
+    }
+    if (!_isExecuting() && layoutPressed) {
         _switchPage(BuPage::Layouts);
         return;
     }
@@ -1043,11 +958,10 @@ void AppBadUSB::_updateRunning()
 
     /* --- Waiting for host to mount HID (USB) or pair (BLE) --- */
     case ExecState::WaitConnect:
+        _device->button.A.pressed(); // Discard clicks while disconnected; never auto-run on connect.
         if (_isConnected()) {
             // BLE readiness includes encryption and the host's HID subscription.
             _execState = ExecState::Ready;
-        } else {
-            _bleReadyAt = 0;   /* restart timer if connection drops */
         }
         if (now - _lastDraw > 200) { _drawRunningDynamic(); _lastDraw = now; }
         break;
@@ -1066,9 +980,7 @@ void AppBadUSB::_updateRunning()
     /* --- Paused by user (legacy; [A] now stops instead) --- */
     case ExecState::Paused:
         if (_device->button.A.pressed()) {
-            _kbdReleaseAll();
-            _execState   = ExecState::Done;
-            _execEndTime = millis();
+            _finishExec(ExecState::Stopped);
         }
         if (now - _lastDraw > 200) { _drawRunningDynamic(); _lastDraw = now; }
         break;
@@ -1076,11 +988,45 @@ void AppBadUSB::_updateRunning()
     /* --- Finished / errored: [A] re-runs the same script from start --- */
     case ExecState::Idle:
     case ExecState::Done:
+    case ExecState::Stopped:
     case ExecState::Error:
         if (_execEndTime == 0 &&
-            (_execState == ExecState::Done || _execState == ExecState::Error))
+            (_execState == ExecState::Done || _execState == ExecState::Stopped || _execState == ExecState::Error))
             _execEndTime = millis();
         if (_device->button.A.pressed()) {
+            if (_mode==BuMode::BLE && bu_ble_requires_reconnect()) {
+                if (bu_ble_reconnect()) {
+                    _txFault=false;_execState=ExecState::WaitConnect;_lastDraw=0;
+                    _drawRunningDynamic();
+                }
+                break;
+            }
+            if (_mode==BuMode::USB && _execState==ExecState::Error && (_txFault || !_isConnected())) {
+                _kbdReleaseAll();
+                if (usb_hid_reconnect()) {
+                    _txFault=false;
+                    _execState=ExecState::WaitConnect;
+                    _execStartTime=_execEndTime=0;
+                    _lineIdx=0;
+                    _lastDraw=0;
+                } else {
+                    _errMsg="USB reconnect failed. Check cable.";
+                    _lastDrawnState=ExecState::Idle;
+                }
+                _drawRunningDynamic();
+                break; // Re-enumeration never automatically runs the script.
+            }
+            if (_mode == BuMode::BLE && !_bleStarted) {
+                _bleBegin();
+                if (!_bleStarted) {
+                    _errMsg = bluetooth_manager::enabled() ? "Bluetooth busy/error" : "Enable Bluetooth in Settings";
+                    _errLine = 0;
+                    _execState = ExecState::Error;
+                    _lastDrawnState = ExecState::Idle;
+                    _drawRunningDynamic();
+                    break;
+                }
+            }
             if (_isConnected()) _startExec();
             else                _execState = ExecState::WaitConnect;
         }
@@ -1088,20 +1034,16 @@ void AppBadUSB::_updateRunning()
         break;
 
     case ExecState::WaitButton:
-        /* [A] = stop & abort (no pause feature per spec). */
+        /* DuckyScript wait is a checkpoint, not a request to abort. */
         if (_device->button.A.pressed()) {
-            _kbdReleaseAll();
-            _execState   = ExecState::Done;
-            _execEndTime = millis();
+            _execState = ExecState::Running;
         }
         if (now - _lastDraw > 200) { _drawRunningDynamic(); _lastDraw = now; }
         break;
 
     case ExecState::Delay:
         if (_device->button.A.pressed()) {
-            _kbdReleaseAll();
-            _execState   = ExecState::Done;
-            _execEndTime = millis();
+            _finishExec(ExecState::Stopped);
             break;
         }
         if (badusb_parse::deadlineReached(now, _delayEnd)) _execState = ExecState::Running;
@@ -1110,20 +1052,28 @@ void AppBadUSB::_updateRunning()
 
     case ExecState::StringDelay:
         if (_device->button.A.pressed()) {
-            _kbdReleaseAll();
-            _execState   = ExecState::Done;
-            _execEndTime = millis();
+            _finishExec(ExecState::Stopped);
             break;
         }
+        // One character per tick keeps BLE's notification wait and Stop responsive.
         if (badusb_parse::deadlineReached(now, _delayEnd) && _printPos < _printStr.size()) {
             char c = _printStr[_printPos];
-            if (c != '\n') {
+            if (_printAlt) {
+                char code[4];
+                snprintf(code, sizeof(code), "%u", uint8_t(c));
+                _altChar(code);
+            } else if (c != '\n') {
                 _kbdWrite((uint8_t)c);
             } else {
-                _kbdPress(KEY_RETURN); delay(2); _kbdRelease(KEY_RETURN);
+                _kbdPress(KEY_RETURN); if (_mode==BuMode::USB) delay(2); _kbdRelease(KEY_RETURN);
             }
             _printPos++;
-            _delayEnd = now + (_strDelay > 0 ? _strDelay : _defStrDelay);
+            _delayEnd = millis() + (_strDelay > 0 ? _strDelay : _defStrDelay);
+            if (_handleBleCancel()) return;
+            if (_txFault || (!_isConnected() && !(_mode==BuMode::BLE && bu_ble_session_alive()))) {
+                _transportError(_mode == BuMode::BLE ? bu_ble_error() : "USB transfer failed while typing");
+                break;
+            }
         }
         if (_printPos >= _printStr.size()) {
             _strDelay = 0;
@@ -1137,16 +1087,18 @@ void AppBadUSB::_updateRunning()
         if (now - _lastDraw > 100) { _drawRunningDynamic(); _lastDraw = now; }
         break;
 
+    case ExecState::Finishing:
+        // This state is rendered while the synchronous final drain pumps input.
+        break;
     case ExecState::Running: {
         /* [A] = stop & abort (afterwards [A] becomes Run again to re-run). */
         if (_device->button.A.pressed()) {
-            _kbdReleaseAll();
-            _execState   = ExecState::Done;
-            _execEndTime = millis();
+            _finishExec(ExecState::Stopped);
             break;
         }
         int batch = 0;
-        while (_execState == ExecState::Running && batch < 20) {
+        const uint32_t batchStart = millis();
+        while (_execState == ExecState::Running && batch < 20 && millis() - batchStart < 10) {
             batch++;
 
             const char* lineStr = nullptr;
@@ -1158,9 +1110,7 @@ void AppBadUSB::_updateRunning()
                 fromRepeat = true;
             } else {
                 if (_lineIdx >= _lines.size()) {
-                    _execState   = ExecState::Done;
-                    _execEndTime = millis();
-                    _kbdReleaseAll();
+                    _finishExec(ExecState::Done);
                     break;
                 }
                 _prevLine = _lines[_lineIdx];
@@ -1169,10 +1119,9 @@ void AppBadUSB::_updateRunning()
             }
 
             int32_t r = _parseLine(lineStr);
-            if (_mode == BuMode::BLE && (!_bleConnected() || bu_ble_failed())) {
-                _stopExec(); bu_ble_end(); _bleStarted=false;
-                _errMsg="Bluetooth stopped. Reopen script.";
-                _execState=ExecState::Error;
+            if (_handleBleCancel()) return;
+            if (_txFault || (!_isConnected() && !(_mode==BuMode::BLE && bu_ble_session_alive())) || (_mode == BuMode::BLE && bu_ble_failed())) {
+                _transportError(_mode == BuMode::BLE ? bu_ble_error() : "USB transfer failed. Run again.");
                 break;
             }
 
@@ -1192,9 +1141,7 @@ void AppBadUSB::_updateRunning()
             } else if (r <= -10) {
                 _errLine = _lineIdx;
                 if (_errMsg.empty()) _errMsg = "Parse error";
-                _execState   = ExecState::Error;
-                _execEndTime = millis();
-                _kbdReleaseAll();
+                _finishExec(ExecState::Error);
             } else {
                 if (r == 0 && _defDelay > 0 && _repeatCnt == 0) {
                     _delayEnd  = millis() + _defDelay;
@@ -1398,13 +1345,15 @@ bool AppBadUSB::_loadScript(const char* path)
 
     File f = SD_MMC.open(path);
     if (!f) { _errMsg = "Cannot open file"; return false; }
+    if (f.size() > 128 * 1024) { _errMsg = "Script exceeds 128 KB"; f.close(); return false; }
 
     while (f.available()) {
         String ln = f.readStringUntil('\n');
+        if (ln.length() > 2048) { _errMsg = "Line exceeds 2048 bytes"; f.close(); _lines.clear(); return false; }
         if (_lines.empty() && ln.startsWith("\xEF\xBB\xBF")) ln.remove(0, 3);
         while (ln.length() > 0) {
             char c = ln.charAt(ln.length() - 1);
-            if (c == '\r' || c == ' ' || c == '\t')
+            if (c == '\r')
                 ln.remove(ln.length() - 1);
             else break;
         }
@@ -1424,6 +1373,7 @@ bool AppBadUSB::_loadScript(const char* path)
      * are replaced with value in subsequent lines (simple substring sub). */
     {
         std::vector<std::pair<std::string,std::string>> macros;
+        size_t expandedBytes = 0;
         for (auto& ln : _lines) {
             const char* s = ln.c_str();
             while (*s == ' ' || *s == '\t') s++;
@@ -1433,9 +1383,16 @@ bool AppBadUSB::_loadScript(const char* path)
                 for (auto& m : macros) {
                     size_t pos = 0;
                     while ((pos = ln.find(m.first, pos)) != std::string::npos) {
+                        if (ln.size() - m.first.size() + m.second.size() > 2048) {
+                            _errMsg = "Expanded line exceeds 2048 bytes"; _lines.clear(); return false;
+                        }
                         ln.replace(pos, m.first.size(), m.second);
                         pos += m.second.size();
                     }
+                }
+                expandedBytes += ln.size() + 1;
+                if (expandedBytes > 256 * 1024) {
+                    _errMsg = "Expanded script exceeds 256 KB"; _lines.clear(); return false;
                 }
                 continue;
             }
@@ -1447,6 +1404,7 @@ bool AppBadUSB::_loadScript(const char* path)
             while (*p == ' ' || *p == '\t') p++;
             std::string value(p);   /* rest of line */
             if (!name.empty()) {
+                if (macros.size() >= 128) { _errMsg = "Too many DEFINE entries"; _lines.clear(); return false; }
                 /* keep macros sorted longest-first for greedy substitution */
                 auto it = macros.begin();
                 while (it != macros.end() && it->first.size() >= name.size()) ++it;
@@ -1468,12 +1426,18 @@ void AppBadUSB::_startExec()
     _keyHoldNb  = 0;
     _printStr.clear();
     _printPos   = 0;
+    _printAlt   = false;
     _repeatLine.clear();
     _prevLine.clear();
     _errMsg.clear();
     _errLine    = 0;
     _execStartTime = millis();
     _execEndTime   = 0;
+    _txFault = false;_bleStopRequested=_bleBackRequested=false;
+    if (_mode==BuMode::BLE && !bu_ble_clear_error()) {
+        _transportError(bu_ble_error());
+        return;
+    }
     _execState  = ExecState::Running;
     _lastDraw   = 0;
     _kbdReleaseAll();
@@ -1481,9 +1445,48 @@ void AppBadUSB::_startExec()
 
 void AppBadUSB::_stopExec()
 {
-    _execState   = ExecState::Idle;
-    _execEndTime = 0;
+    _finishExec(ExecState::Idle);
+}
+
+void AppBadUSB::_finishExec(ExecState state)
+{
+    const bool finishing=state==ExecState::Done && _mode==BuMode::BLE;
+    _execState=finishing ? ExecState::Finishing : state;
+    _repeatCnt=0;_printStr.clear();_printPos=0;
     _kbdReleaseAll();
+    if (finishing) {
+        const bool drained=bu_ble_wait_idle();
+        if (_bleStopRequested) _execState=ExecState::Stopped;
+        else if (!drained) { _execState=ExecState::Error;_errLine=_lineIdx;_errMsg=bu_ble_error(); }
+        else _execState=ExecState::Done;
+    }
+    _execEndTime=_execStartTime ? millis() : 0;
+}
+
+void AppBadUSB::_transportError(const char* message)
+{
+    _errLine=_lineIdx;
+    if (_mode==BuMode::USB) {
+        const auto d=usb_hid_last_tx();
+        if (d.status!=USB_HID_TX_OK) _errMsg=usb_hid_tx_message(d.status);
+        else if (!_isConnected()) _errMsg=usb_hid_tx_message(USB_HID_TX_UNMOUNTED);
+        else if (_errMsg.empty()) _errMsg=message;
+        Serial.printf("[BadUSB USB] report=%u stage=%u accepted=%u wait=%lu attempts=%lu char=%u mounted=%u\n",
+            d.report_id,unsigned(d.status),d.accepted,static_cast<unsigned long>(d.waited_ms),
+            static_cast<unsigned long>(d.attempts),unsigned(_printPos),unsigned(_isConnected()));
+    } else _errMsg=message;
+    Serial.printf("[BadUSB] mode=%s line=%u tx_fault=%u: %s\n",
+        _mode==BuMode::BLE?"BLE":"USB",unsigned(_lineIdx),unsigned(_txFault),_errMsg.c_str());
+    if (_mode==BuMode::BLE) {
+        const auto d=bu_ble_diagnostics();
+        Serial.printf("[BadUSB BLE] link=%u enc=%u sub=%u/%u/%u busy=%u interval=%u disconnect=0x%02x tx=%d\n",
+            d.linked,d.encrypted,d.keyboardSubscribed,d.consumerSubscribed,d.mouseSubscribed,d.congested,
+            d.intervalMs,d.disconnectReason,d.lastSendResult);
+        Serial.printf("[BadUSB BLE] accepted_congestion=%lu rejected_retry=%lu\n",
+            static_cast<unsigned long>(d.recoveredCongestions),static_cast<unsigned long>(d.rejectedRetries));
+    }
+    _finishExec(ExecState::Error);
+    // No automatic replay, USB detach, BLE controller deinit, or reboot here.
 }
 
 /* ================================================================ */
@@ -1634,34 +1637,18 @@ int32_t AppBadUSB::_parseLine(const char* line)
         return -10;
     }
 
-    /* --- STRINGLN text --- */
-    if (cl == 8 && strncmp(line, "STRINGLN", 8) == 0) {
-        const char* text = param;
-        uint32_t sd = _strDelay > 0 ? _strDelay : _defStrDelay;
-        if (sd > 0) {
-            _printStr  = text;
-            _printStr += '\n';
-            _printPos  = 0;
-            _delayEnd  = millis();
-            return -5;
+    /* STRING/STRINGLN are cooperative: a large line cannot monopolize the UI. */
+    if ((cl == 8 && strncmp(line, "STRINGLN", 8) == 0) ||
+        (cl == 6 && strncmp(line, "STRING", 6) == 0)) {
+        for (const unsigned char* p = reinterpret_cast<const unsigned char*>(param); *p; ++p) {
+            if (*p >= 128) { _errMsg = "STRING supports ASCII only"; return -10; }
         }
-        if (*text) _kbdPrint(text);
-        _kbdPress(KEY_RETURN); delay(2); _kbdRelease(KEY_RETURN);
-        return 0;
-    }
-
-    /* --- STRING text --- */
-    if (cl == 6 && strncmp(line, "STRING", 6) == 0) {
-        const char* text = (strlen(line) > 7) ? param : "";
-        uint32_t sd = _strDelay > 0 ? _strDelay : _defStrDelay;
-        if (sd > 0) {
-            _printStr = text;
-            _printPos = 0;
-            _delayEnd = millis();
-            return -5;
-        }
-        if (*text) _kbdPrint(text);
-        return 0;
+        _printStr = param;
+        _printAlt = false;
+        if (cl == 8) _printStr += '\n';
+        _printPos = 0;
+        _delayEnd = millis();
+        return -5;
     }
 
     /* --- REPEAT n --- */
@@ -1701,9 +1688,16 @@ int32_t AppBadUSB::_parseLine(const char* line)
     /* --- ALTSTRING / ALTCODE text --- */
     if ((cl == 9 && strncmp(line, "ALTSTRING", 9) == 0) ||
         (cl == 7 && strncmp(line, "ALTCODE", 7) == 0)) {
+        _printStr = _skipWs(param);
+        // Alt+numpad uses printable ASCII in this implementation.
+        for (unsigned char c : _printStr) {
+            if (c < 32 || c > 126) { _errMsg = "ALTSTRING supports ASCII only"; return -10; }
+        }
         _numlockOn();
-        _altString(_skipWs(param));
-        return 0;
+        _printAlt = true;
+        _printPos = 0;
+        _delayEnd = millis();
+        return -5;
     }
 
     /* --- HOLD key --- */
@@ -1740,7 +1734,7 @@ int32_t AppBadUSB::_parseLine(const char* line)
     }
 
     /* --- WAIT_FOR_BUTTON_PRESS --- */
-    if (cl == 21 && strncmp(line, "WAIT_FOR_BUTTON_PRESS", 21) == 0 && !*param) return -2;
+    if (cl == 21 && strncmp(line, "WAIT_FOR_BUTTON_PRESS", 21) == 0 && !*_skipWs(param)) return -2;
 
     /* --- MEDIA key --- */
     if (cl == 5 && strncmp(line, "MEDIA", 5) == 0) {
@@ -1820,7 +1814,7 @@ int32_t AppBadUSB::_parseLine(const char* line)
             }
             for (int i = 0; i < nMod; i++) _kbdPress(mods[i]);
             if (k) _kbdPress(k);
-            delay(10);
+            if (_mode==BuMode::USB) delay(10);
             _kbdReleaseAll();
             return 0;
         }
@@ -1828,12 +1822,12 @@ int32_t AppBadUSB::_parseLine(const char* line)
         p = _skipWs(line);
         uint8_t k = _keyByName(p);
         if (k) {
-            _kbdPress(k); delay(10); _kbdRelease(k);
+            _kbdPress(k); if (_mode==BuMode::USB) delay(10); _kbdRelease(k);
             return 0;
         }
 
         if (strlen(p) == 1 && *p >= 0x20 && *p <= 0x7E) {
-            _kbdPress((uint8_t)*p); delay(10); _kbdRelease((uint8_t)*p);
+            _kbdPress((uint8_t)*p); if (_mode==BuMode::USB) delay(10); _kbdRelease((uint8_t)*p);
             return 0;
         }
     }
@@ -1846,185 +1840,109 @@ int32_t AppBadUSB::_parseLine(const char* line)
 /* ================================================================ */
 /*  HID wrappers -- all no-ops when ARDUINO_USB_MODE != 0
  * ================================================================ */
-void AppBadUSB::_kbdPress(uint8_t k)
+bool AppBadUSB::_sendKeyboard(const uint8_t report[8])
 {
-    if (_mode == BuMode::BLE) { bu_ble_press(k); return; }
-#if ARDUINO_USB_MODE == 0
-    usb_hid_kbd().press(k);
-#else
-    (void)k;
-#endif
+    const bool ok = _mode == BuMode::BLE ? bu_ble_keyboard_report(report) : usb_hid_send_keyboard(report);
+    if (!ok) _txFault = true;
+    return ok;
 }
 
-void AppBadUSB::_kbdRelease(uint8_t k)
+void AppBadUSB::_kbdPress(uint8_t key)
 {
-    if (_mode == BuMode::BLE) { bu_ble_release(k); return; }
-#if ARDUINO_USB_MODE == 0
-    usb_hid_kbd().release(k);
-#else
-    (void)k;
-#endif
+    if (_txFault) return;
+    if (!_keyboard.press(badusb_hid::decode(key,_layoutLoaded?_layout:nullptr))) {
+        _txFault=true;_errMsg="Invalid layout/key or HID slots full";return;
+    }
+    _sendKeyboard(_keyboard.bytes);
+}
+
+void AppBadUSB::_kbdRelease(uint8_t key)
+{
+    if (_txFault) return;
+    _keyboard.release(badusb_hid::decode(key,_layoutLoaded?_layout:nullptr));
+    _sendKeyboard(_keyboard.bytes);
 }
 
 void AppBadUSB::_kbdReleaseAll()
 {
-    _keyHoldNb = 0;
-    if (_mode == BuMode::BLE) { bu_ble_release_all(); return; }
-#if ARDUINO_USB_MODE == 0
-    usb_hid_kbd().releaseAll();
-    usb_hid_mouse().release(0x07);
-    usb_hid_consumer().release();
-#endif
-}
-
-void AppBadUSB::_kbdPrint(const char* s)
-{
-    if (_mode == BuMode::BLE) { bu_ble_print(s); return; }
-#if ARDUINO_USB_MODE == 0
-    /* Honour active keyboard layout (USB only - BLE has no pressRaw). */
-    if (_layoutLoaded) {
-        for (const char* p = s; p && *p; ++p) _kbdWrite((uint8_t)*p);
-        return;
+    _keyHoldNb=0; _keyboard.clear(); _mouseButtons=0;
+    if (!_isConnected() && !(_mode==BuMode::BLE && bu_ble_session_alive())) return;
+    // Try neutral reports even after a prior send failed; don't end either stack.
+    if (_mode==BuMode::BLE) {
+        bu_ble_keyboard_report(_keyboard.bytes);
+        bu_ble_mouse_report(0,0,0,0);
+        bu_ble_consumer_report(0);
+    } else {
+        usb_hid_send_keyboard(_keyboard.bytes);
+        usb_hid_send_mouse(0,0,0,0);
+        usb_hid_send_consumer(0);
     }
-    usb_hid_kbd().print(s);
-#else
-    (void)s;
-#endif
 }
 
-void AppBadUSB::_kbdWrite(uint8_t c)
+void AppBadUSB::_kbdWrite(uint8_t character)
 {
-    if (_mode == BuMode::BLE) { bu_ble_write(c); return; }
-#if ARDUINO_USB_MODE == 0
-    /* Apply keyboard layout when loaded (USB only). */
-    if (_layoutLoaded && c < 128) {
-        uint16_t entry = _layout[c];
-        uint8_t  hid   = entry & 0xFF;
-        uint8_t  mod   = entry >> 8;
-        if (hid != 0) {
-            if (mod & 0x01) usb_hid_kbd().press(KEY_LEFT_CTRL);
-            if (mod & 0x02) usb_hid_kbd().press(KEY_LEFT_SHIFT);
-            if (mod & 0x04) usb_hid_kbd().press(KEY_LEFT_ALT);
-            if (mod & 0x08) usb_hid_kbd().press(KEY_LEFT_GUI);
-            if (mod & 0x40) usb_hid_kbd().press(KEY_RIGHT_ALT);
-            usb_hid_kbd().pressRaw(hid);
-            delay(2);
-            usb_hid_kbd().releaseRaw(hid);
-            usb_hid_kbd().releaseAll();
-            return;
-        }
+    if (_txFault) return;
+    // Overlay a typed character on held keys, then restore them exactly.
+    auto temporary=_keyboard;
+    if (!temporary.press(badusb_hid::decode(character,_layoutLoaded?_layout:nullptr))) {
+        char reason[48];snprintf(reason,sizeof(reason),"Cannot map character 0x%02X",character);
+        _txFault=true;_errMsg=reason;return;
     }
-    usb_hid_kbd().write(c);
-#else
-    (void)c;
-#endif
+    if (_sendKeyboard(temporary.bytes)) _sendKeyboard(_keyboard.bytes);
 }
 
-void AppBadUSB::_mouseClick(uint8_t b)
+void AppBadUSB::_mousePress(uint8_t button)
 {
-    if (_mode == BuMode::BLE) { (void)b; return; }   /* BleKeyboard has no mouse */
-#if ARDUINO_USB_MODE == 0
-    usb_hid_mouse().click(b);
-#else
-    (void)b;
-#endif
+    if (_txFault) return;
+    _mouseButtons|=button;
+    _mouseMove(0,0);
 }
-
-void AppBadUSB::_mousePress(uint8_t b)
+void AppBadUSB::_mouseRelease(uint8_t button)
 {
-    if (_mode == BuMode::BLE) { (void)b; return; }
-#if ARDUINO_USB_MODE == 0
-    usb_hid_mouse().press(b);
-#else
-    (void)b;
-#endif
+    if (_txFault) return;
+    _mouseButtons&=~button;
+    _mouseMove(0,0);
 }
-
-void AppBadUSB::_mouseRelease(uint8_t b)
+void AppBadUSB::_mouseClick(uint8_t button) { _mousePress(button); _mouseRelease(button); }
+void AppBadUSB::_mouseMove(int8_t x,int8_t y)
 {
-    if (_mode == BuMode::BLE) { (void)b; return; }
-#if ARDUINO_USB_MODE == 0
-    usb_hid_mouse().release(b);
-#else
-    (void)b;
-#endif
+    if (_txFault) return;
+    const bool ok=_mode==BuMode::BLE ? bu_ble_mouse_report(_mouseButtons,x,y,0) : usb_hid_send_mouse(_mouseButtons,x,y,0);
+    if (!ok) _txFault=true;
 }
-
-void AppBadUSB::_mouseMove(int8_t x, int8_t y)
+void AppBadUSB::_mouseScroll(int8_t wheel)
 {
-    if (_mode == BuMode::BLE) {
-        /* BleKeyboard does not implement mouse movement. */
-        (void)x; (void)y;
-        return;
-    }
-#if ARDUINO_USB_MODE == 0
-    usb_hid_mouse().move(x, y, 0, 0);
-#else
-    (void)x; (void)y;
-#endif
+    if (_txFault) return;
+    const bool ok=_mode==BuMode::BLE ? bu_ble_mouse_report(_mouseButtons,0,0,wheel) : usb_hid_send_mouse(_mouseButtons,0,0,wheel);
+    if (!ok) _txFault=true;
 }
-
-void AppBadUSB::_mouseScroll(int8_t scroll)
+void AppBadUSB::_consumerPress(uint16_t usage)
 {
-    if (_mode == BuMode::BLE) {
-        (void)scroll;
-        return;
-    }
-#if ARDUINO_USB_MODE == 0
-    usb_hid_mouse().move(0, 0, scroll, 0);
-#else
-    (void)scroll;
-#endif
+    if (_txFault) return;
+    const bool ok=_mode==BuMode::BLE ? bu_ble_consumer_report(usage) : usb_hid_send_consumer(usage);
+    if (!ok) _txFault=true;
 }
-
-void AppBadUSB::_consumerPress(uint16_t k)
-{
-    if (_mode == BuMode::BLE) {
-        /* BleKeyboard has its own media-key constants and a press() overload
-         * for MediaKeyReport; raw 16-bit consumer codes aren't supported here. */
-        (void)k;
-        return;
-    }
-#if ARDUINO_USB_MODE == 0
-    usb_hid_consumer().press(k);
-#else
-    (void)k;
-#endif
-}
-
-void AppBadUSB::_consumerRelease()
-{
-    if (_mode == BuMode::BLE) return;
-#if ARDUINO_USB_MODE == 0
-    usb_hid_consumer().release();
-#endif
-}
+void AppBadUSB::_consumerRelease() { _consumerPress(0); }
 
 /* ================================================================ */
 /*  ALTCHAR / ALTSTRING -- Alt + numpad character entry
  * ================================================================ */
 void AppBadUSB::_numlockOn()
 {
-#if ARDUINO_USB_MODE == 0
-    if (!(usb_hid_leds() & LED_NUMLOCK)) {
-        usb_hid_kbd().press(KEY_NUM_LOCK);
-        delay(5);
-        usb_hid_kbd().release(KEY_NUM_LOCK);
-        delay(50);
+    const uint8_t leds=_mode==BuMode::BLE ? bu_ble_leds() : usb_hid_leds();
+    if (!(leds & LED_NUMLOCK)) {
+        _kbdPress(KEY_NUM_LOCK);
+        _kbdRelease(KEY_NUM_LOCK);
+        delay(50); // Allow the host's output/LED report to arrive.
     }
-#endif
 }
 
 bool AppBadUSB::_numpadPress(char digit)
 {
-    if (digit < '0' || digit > '9') return false;
-#if ARDUINO_USB_MODE == 0
-    uint8_t raw = s_numpadKeys[digit - '0'];
-    usb_hid_kbd().pressRaw(raw);
-    delay(2);
-    usb_hid_kbd().releaseRaw(raw);
-#endif
-    return true;
+    if (digit<'0' || digit>'9') return false;
+    const uint8_t key=s_numpadKeys[digit-'0']+136;
+    _kbdPress(key); _kbdRelease(key);
+    return !_txFault;
 }
 
 void AppBadUSB::_altChar(const char* code)
@@ -2035,18 +1953,6 @@ void AppBadUSB::_altChar(const char* code)
         code++;
     }
     _kbdRelease(KEY_LEFT_ALT);
-}
-
-bool AppBadUSB::_altString(const char* param)
-{
-    while (*param) {
-        if (*param < ' ' || *param > '~') { param++; continue; }
-        char tmp[4];
-        snprintf(tmp, sizeof(tmp), "%u", (uint8_t)*param);
-        _altChar(tmp);
-        param++;
-    }
-    return true;
 }
 
 } // namespace MOONCAKE::APPS

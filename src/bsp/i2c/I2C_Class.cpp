@@ -64,6 +64,39 @@ bool I2C_Class::release(void) const
     return i2c_driver_delete(_port_num) == ESP_OK;
 }
 
+bool I2C_Class::transfer(std::uint8_t address, const std::uint8_t* tx,
+                         std::size_t txLength, std::uint8_t* rx,
+                         std::size_t rxLength, std::uint32_t timeoutMs) const
+{
+    if (!isEnabled() || !_mutex || address > 0x7f || (!txLength && !rxLength) ||
+        (txLength && !tx) || (rxLength && !rx)) return false;
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    if (!cmd) return false;
+    esp_err_t err = ESP_OK;
+    auto step = [&](esp_err_t value) { if (err == ESP_OK) err = value; };
+    if (txLength) {
+        step(i2c_master_start(cmd));
+        step(i2c_master_write_byte(cmd, (address << 1) | I2C_MASTER_WRITE, true));
+        step(i2c_master_write(cmd, tx, txLength, true));
+    }
+    if (rxLength) {
+        step(i2c_master_start(cmd));
+        step(i2c_master_write_byte(cmd, (address << 1) | I2C_MASTER_READ, true));
+        if (rxLength > 1) step(i2c_master_read(cmd, rx, rxLength - 1, I2C_MASTER_ACK));
+        step(i2c_master_read_byte(cmd, rx + rxLength - 1, I2C_MASTER_NACK));
+    }
+    step(i2c_master_stop(cmd));
+    const TickType_t ticks = pdMS_TO_TICKS(timeoutMs ? timeoutMs : 1) + 1;
+    if (err == ESP_OK) {
+        if (xSemaphoreTake(_mutex, ticks) == pdTRUE) {
+            err = i2c_master_cmd_begin(_port_num, cmd, ticks);
+            xSemaphoreGive(_mutex);
+        } else err = ESP_ERR_TIMEOUT;
+    }
+    i2c_cmd_link_delete(cmd);
+    return err == ESP_OK;
+}
+
 // ── Register-level operations ──
 
 bool I2C_Class::writeRegister(std::uint8_t address, std::uint8_t reg,

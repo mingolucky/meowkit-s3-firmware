@@ -12,9 +12,11 @@ lv_obj_t * ui_left;
 lv_obj_t * ui_app_01;  lv_obj_t * ui_app_02;  lv_obj_t * ui_app_03;
 lv_obj_t * ui_app_04;  lv_obj_t * ui_app_05;  lv_obj_t * ui_app_06;
 lv_obj_t * ui_app_07;  lv_obj_t * ui_app_08;  lv_obj_t * ui_app_09;
+lv_obj_t * ui_app_10;
 lv_obj_t * ui_name_01; lv_obj_t * ui_name_02; lv_obj_t * ui_name_03;
 lv_obj_t * ui_name_04; lv_obj_t * ui_name_05; lv_obj_t * ui_name_06;
 lv_obj_t * ui_name_07; lv_obj_t * ui_name_08; lv_obj_t * ui_name_09;
+lv_obj_t * ui_name_10;
 
 static lv_obj_t * _scroll_cont = NULL;
 
@@ -53,11 +55,11 @@ void ui_apps_menu_load_apps(const AppMenuEntry_t * entries, int count)
 
     lv_obj_t ** app_ptrs[APPS_MENU_MAX_APPS] = {
         &ui_app_01, &ui_app_02, &ui_app_03, &ui_app_04, &ui_app_05,
-        &ui_app_06, &ui_app_07, &ui_app_08, &ui_app_09,
+        &ui_app_06, &ui_app_07, &ui_app_08, &ui_app_09, &ui_app_10,
     };
     lv_obj_t ** name_ptrs[APPS_MENU_MAX_APPS] = {
         &ui_name_01, &ui_name_02, &ui_name_03, &ui_name_04, &ui_name_05,
-        &ui_name_06, &ui_name_07, &ui_name_08, &ui_name_09,
+        &ui_name_06, &ui_name_07, &ui_name_08, &ui_name_09, &ui_name_10,
     };
 
     for (int i = 0; i < APPS_MENU_MAX_APPS; i++) {
@@ -92,6 +94,7 @@ static const struct {
     { &ui_img_ble_spam_png,    "BLE Spam"    },
     { &ui_img_badusb_png,      "BadUSB"      },
     { &ui_img_infrared_png,    "Infrared"    },
+    { &ui_img_nfc_png,         "NFC"         },
 };
 
 /* 3 fixed column X positions */
@@ -155,11 +158,11 @@ void ui_apps_menu_screen_init(void)
     /* Pointer arrays map loop index → named global variable */
     lv_obj_t ** app_ptrs[APPS_MENU_MAX_APPS] = {
         &ui_app_01, &ui_app_02, &ui_app_03, &ui_app_04, &ui_app_05,
-        &ui_app_06, &ui_app_07, &ui_app_08, &ui_app_09,
+        &ui_app_06, &ui_app_07, &ui_app_08, &ui_app_09, &ui_app_10,
     };
     lv_obj_t ** name_ptrs[APPS_MENU_MAX_APPS] = {
         &ui_name_01, &ui_name_02, &ui_name_03, &ui_name_04, &ui_name_05,
-        &ui_name_06, &ui_name_07, &ui_name_08, &ui_name_09,
+        &ui_name_06, &ui_name_07, &ui_name_08, &ui_name_09, &ui_name_10,
     };
 
     for (int i = 0; i < APPS_MENU_MAX_APPS; i++) {
@@ -219,7 +222,9 @@ void ui_apps_menu_screen_destroy(void)
     ui_app_01  = NULL; ui_app_02  = NULL; ui_app_03  = NULL;
     ui_app_04  = NULL; ui_app_05  = NULL; ui_app_06  = NULL;
     ui_app_07  = NULL; ui_app_08  = NULL; ui_app_09  = NULL;
+    ui_app_10 = NULL;
     ui_name_01 = NULL; ui_name_02 = NULL; ui_name_03 = NULL;
     ui_name_04 = NULL; ui_name_05 = NULL; ui_name_06 = NULL;
     ui_name_07 = NULL; ui_name_08 = NULL; ui_name_09 = NULL;
+    ui_name_10 = NULL;
 }

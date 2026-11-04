@@ -20,11 +20,13 @@ extern lv_obj_t * ui_left;
 extern lv_obj_t * ui_app_01;  extern lv_obj_t * ui_app_02;  extern lv_obj_t * ui_app_03;
 extern lv_obj_t * ui_app_04;  extern lv_obj_t * ui_app_05;  extern lv_obj_t * ui_app_06;
 extern lv_obj_t * ui_app_07;  extern lv_obj_t * ui_app_08;  extern lv_obj_t * ui_app_09;
+extern lv_obj_t * ui_app_10;
 extern lv_obj_t * ui_name_01; extern lv_obj_t * ui_name_02; extern lv_obj_t * ui_name_03;
 extern lv_obj_t * ui_name_04; extern lv_obj_t * ui_name_05; extern lv_obj_t * ui_name_06;
 extern lv_obj_t * ui_name_07; extern lv_obj_t * ui_name_08; extern lv_obj_t * ui_name_09;
+extern lv_obj_t * ui_name_10;
 /* ── Dynamic app loading API ─────────────────────────────────────── */
-#define APPS_MENU_MAX_APPS  9
+#define APPS_MENU_MAX_APPS  10
 
 typedef struct {
     char         id[32];

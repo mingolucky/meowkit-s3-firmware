@@ -9,11 +9,19 @@
  * @copyright Copyright (c) 2025
  */
 #pragma once
+#ifdef BADUSB_HOST_TEST
+#include "../../../test/badusb/stubs/platform.h"
+#else
 #include <mooncake.h>
 #include "../../bsp/devices.h"
+#include "../app_common/hp_ui.h"
+#include "../../system/usb_hid.h"
+#include "../../system/usb_manager.h"
+#endif
 #include <vector>
 #include <string>
-#include "../app_common/hp_ui.h"
+#include "badusb_keyboard.h"
+#include "badusb_ble.h"
 
 /* ── TUI colors: aliases to shared hp_ui palette (file scope) ── */
 static constexpr uint16_t BU_BG        = hp::COL_BG;
@@ -21,9 +29,6 @@ static constexpr uint16_t BU_FG        = hp::COL_FG;
 static constexpr uint16_t BU_FG_DIM    = hp::COL_DIM;
 static constexpr uint16_t BU_ACCENT    = hp::COL_ACCENT;
 static constexpr uint16_t BU_HIGHLIGHT = hp::COL_HL;
-
-#include "../../system/usb_hid.h"
-#include "../../system/usb_manager.h"
 
 using namespace mooncake;
 
@@ -33,18 +38,20 @@ namespace MOONCAKE::APPS
 /* ── Execution states ── */
 enum class ExecState : uint8_t {
     Idle,
-    WaitConnect,   /* Script loaded, waiting for USB host to mount HID */
-    Ready,         /* USB connected, awaiting [A] to start */
+    WaitConnect,   /* Waiting for the selected HID transport to become ready. */
+    Ready,         /* Connected, awaiting [A] to start. */
     Running,
     Paused,        /* User-toggled pause via [A] during run */
     Delay,
     StringDelay,
     WaitButton,
     Done,
+    Stopped,      /* User aborted; distinct from successful completion. */
+    Finishing,    /* Neutral reports/drain have not completed yet. */
     Error
 };
 
-/* ── HID transport mode (UI toggle via [B]) ── */
+/* HID transport mode (Left/Right while idle). */
 enum class BuMode : uint8_t { USB, BLE };
 
 /* ── Page IDs ── */
@@ -85,6 +92,14 @@ private:
     void _drawRunningFooter();
     void _drawStateBadge();
     bool _isConnected() const;
+    bool _isExecuting() const;
+    void _switchMode();
+    void _finishExec(ExecState state);
+    void _transportError(const char* message);
+    bool _handlePairing();
+    bool _onBleWait();
+    bool _handleBleCancel();
+    bool _sendKeyboard(const uint8_t report[8]);
 
     /* ── Scene handlers ── */
     void _enterFileList();
@@ -127,6 +142,10 @@ private:
     /* string-delay typing */
     std::string   _printStr;
     size_t        _printPos   = 0;
+    bool          _printAlt   = false;
+    badusb_hid::Keyboard _keyboard;
+    uint8_t _mouseButtons = 0;
+    bool _txFault = false;
 
     /* error info */
     std::string   _errMsg;
@@ -135,11 +154,14 @@ private:
     unsigned long _execStartTime = 0;  /* millis() when script started */
     unsigned long _execEndTime   = 0;  /* millis() when Done/Error (0 = still running) */
 
-    /* HID transport mode (UI toggle) */
+    /* HID transport mode (Left/Right while idle). */
     BuMode _mode = BuMode::USB;
 
     /* BLE keyboard state */
     bool   _bleStarted = false;
+    bool _bleStopRequested = false, _bleBackRequested = false;
+    BuBlePairing _shownPairing = BuBlePairing::None;
+    uint32_t _shownPin = 0;
     bool   _bleConnected() const;
     void   _bleBegin();
 
@@ -156,10 +178,7 @@ private:
     ExecState     _lastDrawnState = ExecState::Idle;
     BuMode        _lastDrawnMode  = BuMode::USB;
     bool          _lastConnected  = false;
-
-    /* BLE CCCD settling: host needs ~500-1000 ms after link-up to subscribe
-     * to notifications.  Zero = not started, nonzero = millis() deadline. */
-    unsigned long _bleReadyAt = 0;
+    bool          _lastRecovering = false;
 
     /* ── Script control ── */
     bool    _loadScript(const char* path);
@@ -187,7 +206,6 @@ private:
     void _kbdPress(uint8_t k);
     void _kbdRelease(uint8_t k);
     void _kbdReleaseAll();
-    void _kbdPrint(const char* s);
     void _kbdWrite(uint8_t c);
     void _mouseClick(uint8_t b);
     void _mousePress(uint8_t b);
@@ -201,7 +219,6 @@ private:
     void _numlockOn();
     bool _numpadPress(char digit);
     void _altChar(const char* code);
-    bool _altString(const char* param);
 };
 
 } // namespace MOONCAKE::APPS

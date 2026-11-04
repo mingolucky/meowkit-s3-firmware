@@ -4,6 +4,10 @@
 # Local VS Code configuration
 .vscode/
 
+# Python tools and host tests
+__pycache__/
+*.py[cod]
+
 # Operating system files
 .DS_Store
 Thumbs.db

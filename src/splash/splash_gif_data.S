@@ -2,5 +2,5 @@
     .balign 4
     .global splash_gif_data
 splash_gif_data:
-    .incbin "c:/Users/zmm04/Desktop/MeowKit-S3 Firmware/src/system/assets/boot_animation.gif"
+    .incbin "C:/Users/zmm04/Desktop/MeowKit-S3 Firmware/src/system/assets/boot_animation.gif"
     .balign 4

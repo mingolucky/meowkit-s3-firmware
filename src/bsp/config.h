@@ -14,7 +14,7 @@
  *  Project Meta
  * ═══════════════════════════════════════════════════════════════ */
 #define PROJECT_NAME                "MeowKit-S3"
-#define FIRMWARE_VERSION            "v1.0.3"
+#define FIRMWARE_VERSION            "v1.0.4"
 
 /* ═══════════════════════════════════════════════════════════════
  *  Hardware Board Test (BBT) — set 1 to enable, 0 to disable
@@ -61,6 +61,12 @@
 #define HAL_PIN_I2C_SDA             1
 #define HAL_I2C_FREQ                100000    /* 100 kHz */
 
+/* ST25R3916-AQWT expansion: I2C_EN pulled high, IRQ/AAT/EXT_LM unconnected.
+ * SDA/SCL use the shared bus above; never initialize a second Wire driver. */
+#define HAL_NFC_IRQ_PIN             (-1)
+#define HAL_NFC_XTAL_HZ             27120000UL
+#define HAL_NFC_SUPPLY_MV           3300
+
 /* ═══════════════════════════════════════════════════════════════
  *  I2S — Audio bus (ES8311 DAC + ES7210 ADC, shared BCLK/WS)
  * ═══════════════════════════════════════════════════════════════ */
@@ -103,6 +109,7 @@
 #define HAL_I2C_ADDR_PCF8563        0x51
 #define HAL_I2C_ADDR_BMI270         0x68
 #define HAL_I2C_ADDR_SHT30          0x44
+#define HAL_I2C_ADDR_ST25R3916      0x50
 
 /* ═══════════════════════════════════════════════════════════════
  *  PCA9557 IO Expander Pin Assignments (directly on expander)

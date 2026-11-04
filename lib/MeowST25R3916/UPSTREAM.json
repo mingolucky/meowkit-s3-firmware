@@ -1,0 +1,85 @@
+{
+  "repository": "https://github.com/stm32duino/ST25R3916",
+  "revision": {
+    "sha": "f2617beece4cf513a50ee4f22972cee9e642bb6f",
+    "date": "2026-08-31T11:12:38Z"
+  },
+  "files": [
+    {
+      "path": "src/rfal_rfst25r3916.cpp",
+      "gitBlob": "627c81cb4bdc948814a1396ed19b1bb282a4882e"
+    },
+    {
+      "path": "src/rfal_rfst25r3916.h",
+      "gitBlob": "55c112ba86330c1642e64911a0a0cd653d9105dd"
+    },
+    {
+      "path": "src/rfal_rfst25r3916_analogConfig.cpp",
+      "gitBlob": "9f2ba0fc8bbfe5455b5d8d7e93e649a4501e3560"
+    },
+    {
+      "path": "src/rfal_rfst25r3916_analogConfig.h",
+      "gitBlob": "48c553c6b39dfc94dafacb4a533814988f1a7486"
+    },
+    {
+      "path": "src/rfal_rfst25r3916_analogConfigTbl.h",
+      "gitBlob": "7edb28c33f3741e8448c6234d83605f50036656d"
+    },
+    {
+      "path": "src/rfal_rfst25r3916_crc.cpp",
+      "gitBlob": "d8e2af44c96a64e6570a28acb7fd97f239b9301e"
+    },
+    {
+      "path": "src/rfal_rfst25r3916_iso15693_2.cpp",
+      "gitBlob": "a187ea5525307cd85277d04763f1c73106990006"
+    },
+    {
+      "path": "src/rfal_rfst25r3916_iso15693_2.h",
+      "gitBlob": "1a436724161e5e787d377a068c45de8a1df4c242"
+    },
+    {
+      "path": "src/st25r3916.cpp",
+      "gitBlob": "e8094ab56f7d4419fc5df420527ef6e16b820a40"
+    },
+    {
+      "path": "src/st25r3916.h",
+      "gitBlob": "705fd2efa0fca053b8cc9e10622b35b133a6697d"
+    },
+    {
+      "path": "src/st25r3916_aat.cpp",
+      "gitBlob": "f6f3ca69df5e15d47e5a8bb3e74b4265729040f8"
+    },
+    {
+      "path": "src/st25r3916_aat.h",
+      "gitBlob": "46655a058bfbfb18f7d81b864151049e3033403d"
+    },
+    {
+      "path": "src/st25r3916_com.cpp",
+      "gitBlob": "9712173bb6cea48ffa429820df710e7700e08f95"
+    },
+    {
+      "path": "src/st25r3916_com.h",
+      "gitBlob": "c472f0a96e2da5a08e1aead894b00e32b2ef7f44"
+    },
+    {
+      "path": "src/st25r3916_config.h",
+      "gitBlob": "0d21ae5dad5c6edc9c66d8128ef973677832ff26"
+    },
+    {
+      "path": "src/st25r3916_default_config.h",
+      "gitBlob": "d9f9f0b4d47f26b4ba89b272f22164a175ae3c34"
+    },
+    {
+      "path": "src/st25r3916_interrupt.cpp",
+      "gitBlob": "362a6187bb6343704fefa324ff3ff8bd4f5d69b8"
+    },
+    {
+      "path": "src/st25r3916_interrupt.h",
+      "gitBlob": "7eea6e3be85bb0eb6fe6fe11e423c7a5fdc95d95"
+    },
+    {
+      "path": "src/st25r3916_timer.cpp",
+      "gitBlob": "cb5c44c32a7111ca64c8cb7d8f25d61f2e75fd26"
+    }
+  ]
+}

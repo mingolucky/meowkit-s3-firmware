@@ -1,213 +1,152 @@
 /**
- * @file infrared.h
- * @author Mingo
- * @brief App09 — Infrared (Learn / Saved Remotes / Universal Remote)
- *        Flipper-style TUI  •  翠绿 + 白色色调
- * @version 1.0
- * @date 2025-08-05
- * @copyright Copyright (c) 2025
+ * App09: Momentum infrared application flow adapted to MeowKit hardware.
+ * Upstream: Next-Flip/Momentum-Firmware, applications/main/infrared (GPL-3.0).
  */
 #pragma once
+#ifdef MEOW_IR_HOST_TEST
+#include "../../../test/infrared/stubs/platform.h"
+#else
 #include <mooncake.h>
 #include "../../bsp/devices.h"
-#include <IRsend.h>
 #include <IRrecv.h>
-#include <IRutils.h>
+#include <IRsend.h>
 #include <SD_MMC.h>
-#include <FS.h>
-#include <vector>
-#include <algorithm>
+#endif
 #include "../app_common/hp_ui.h"
+#include "infrared_signal.h"
+#include <atomic>
 
-using namespace mooncake;
+namespace MOONCAKE::APPS {
+class App09 : public mooncake::AppAbility {
+public:
+    explicit App09(DEVICES* device);
+    void onOpen() override;
+    void onRunning() override;
+    void onClose() override;
 
-namespace MOONCAKE::APPS
-{
-    /* ── Flipper-compatible .ir signal storage ── */
-    struct IrSignal {
-        char     name[32];
-        bool     isRaw;
-        /* decoded */
-        decode_type_t protocol;
-        uint64_t value;
-        uint16_t bits;
-        uint32_t address;
-        uint32_t command;
-        /* raw */
-        std::vector<uint16_t> rawData;   /* µs timings */
-        uint32_t frequency;              /* carrier, default 38000 */
+private:
+    enum class Scene : uint8_t {
+        Main, Files, Remote, Learn, Result, Discard, Name, Edit, ButtonSelect,
+        Move, Delete, Universal, Loading, Panel, Actions, Scan, Message
     };
+    enum class NameFor : uint8_t { Learn, Button, Remote };
+    enum class EditFor : uint8_t { Rename, Move, Delete };
+    struct Input {
+        bool up = false, down = false, left = false, right = false;
+        bool a = false, b = false, held = false;
+    } _input;
+    meow_ir::DirectionRepeat _directionRepeat[4];
+    struct Item { String title, subtitle; };
+    struct Frame { Scene scene; int selected, top; String directory; };
+    struct LibraryRecord { uint16_t action; uint32_t offset; };
 
-    struct IrRemote {
-        char     filename[64];
-        char     path[128];
-        std::vector<IrSignal> signals;
-    };
+    DEVICES* _device;
+    Scene _scene = Scene::Main;
+    bool _dirty = true, _armed = false, _drawnTxBusy = false;
+    int _selected = 0, _top = 0, _mainSelected = 0, _universalSelected = 0;
+    std::vector<Item> _items;
+    std::vector<Frame> _history;
+    String _directory = "/infrared";
+    std::vector<String> _entries;
+    bool _libraryBrowser = false;
 
-    /* ── Scene IDs ── */
-    enum class IrScene : uint8_t {
-        MainMenu,
-        LearnWait,
-        LearnResult,
-        LearnSaveLocation,
-        LearnSaveFolderPicker,
-        LearnSaveFolderName,
-        LearnSaveName,
-        LearnSaveExistingConfirm,
-        RemoteList,
-        DeleteConfirm,
-        RemoteView,
-        UniversalMenu,
-        UniversalTV,
-        TVBGone,        /* Iterates all signals in tv.ir like TV-B-Gone */
-        Sending,
-    };
+    std::vector<meow_ir::Signal> _signals;
+    String _remotePath, _remoteName;
+    meow_ir::Signal _learned;
+    bool _learningNew = true, _easy = false;
+    uint8_t _decodeMode = 0; // Auto, Decode only, RAW
+    size_t _easyIndex = 0;
+    Scene _learnOrigin = Scene::Main;
+    bool _discardRetry = false;
+    NameFor _nameFor = NameFor::Learn;
+    EditFor _editFor = EditFor::Rename;
+    char _name[24] = {};
+    bool _lowercase = false, _symbols = false;
+    int _key = 0, _editIndex = 0, _moveIndex = -1;
+    std::vector<meow_ir::Signal> _moveBackup;
+    String _deletePath;
+    bool _deleteRemote = false, _deleteFolder = false;
 
-    /* ── TUI colors ── */
-    static constexpr uint16_t COL_BG        = hp::COL_BG;
-    static constexpr uint16_t COL_FG        = hp::COL_FG;
-    static constexpr uint16_t COL_FG_DIM    = hp::COL_ACCENT;
-    static constexpr uint16_t COL_ACCENT    = hp::COL_ACCENT;
-    static constexpr uint16_t COL_HIGHLIGHT = hp::COL_HL;
-    static constexpr uint16_t COL_ERR       = hp::COL_ERR;
+    int _category = 0;
+    String _libraryPath, _libraryTitle;
+    std::vector<LibraryRecord> _records;
+    std::vector<String> _actions;
+    std::vector<size_t> _queue;
+    meow_ir::Scan _scan;
+    bool _scanPending = false;
+    uint32_t _lastScan = 0, _lastDraw = 0;
+    String _scanName;
+    File _loadingFile;
+    Scene _loadDestination = Scene::Panel;
+    String _loadType, _loadVersion;
+    bool _loadHeaderChecked = false;
 
-    /* ── App class ── */
-    class App09 : public AppAbility {
-    public:
-        App09(DEVICES* device);
-        void onOpen() override;
-        void onRunning() override;
-        void onClose() override;
+    String _messageTitle, _messageDetail, _lastError;
+    uint32_t _messageUntil = 0;
+    IRrecv* _receiver = nullptr;
+    IRsend* _sender = nullptr;
+    InfraredDecoderHandler* _decoder = nullptr;
+    bool _rxEnabled = false;
+    TaskHandle_t _txTask = nullptr;
+    std::atomic<bool> _txBusy{false}, _txCancel{false}, _txShutdown{false};
+    std::atomic<bool> _txStopped{true}, _txSucceeded{true};
+    meow_ir::Signal _txSignal;
+    const meow_ir::Signal* _heldSource = nullptr;
+    bool _txRepeat = false, _holdLatched = false;
+    uint32_t _lastTx = 0;
+    uint32_t _ledPhaseStart = 0, _ledUntil = 0;
+    bool _ledActive = false, _ledOn = false;
 
-    private:
-        DEVICES* _device = nullptr;
+    void _sampleInput();
+    void _setScene(Scene scene);
+    void _push(Scene scene);
+    void _pop();
+    void _returnTo(Scene scene);
+    void _back();
+    void _enter();
+    void _run();
+    void _activate();
+    void _draw();
+    void _drawList(const char* title, const char* action = "Open");
+    void _drawFooter(const char* left, const char* a, const char* b);
+    void _drawButton(int x, int y, int w, int h, const char* label,
+                     bool selected = false);
+    int _listVisible() const;
+    bool _singleLineList() const;
+    void _drawNameKeyboard();
+    void _moveNameKey(int horizontal, int vertical);
+    void _updateLed();
+    void _message(const char* title, const String& detail, uint32_t duration = 0);
+    bool _navigate();
+    void _openFiles(bool library);
+    void _refreshFiles();
+    void _startLearn(bool newRemote);
+    void _receive();
+    void _beginName(NameFor kind, const char* initial);
+    void _commitName();
+    void _finishLearn();
+    void _nextEasy();
+    bool _duplicateName(const char* name, int except = -1) const;
+    void _readSettings();
+    void _writeSettings();
+    void _loadCategory(int category);
+    void _startScan(const String& name);
+    void _runScan();
 
-        /* ── Scene stack ── */
-        IrScene _scene = IrScene::MainMenu;
-        IrScene _prevScene = IrScene::MainMenu;
-        bool    _sceneDirty = true;
-
-        void _switchScene(IrScene s);
-
-        /* ── TUI helpers ── */
-        void _drawHeader(const char* title);
-        void _drawMenuItem(int y, int index, const char* text, bool selected);
-        void _drawMenuItem2(int y, int index, const char* title, const char* sub, bool selected);
-        void _drawFooter3(const char* dirHint, const char* aHint, const char* bHint);
-        void _drawMsgBox(const char* line1, const char* line2 = nullptr);
-        void _drawNameEditor();
-
-        /* ── Scene handlers ── */
-        void _enterMainMenu();
-        void _runMainMenu();
-
-        void _enterLearnWait();
-        void _runLearnWait();
-
-        void _enterLearnResult();
-        void _runLearnResult();
-
-        void _enterLearnSaveName();
-        void _runLearnSaveName();
-        void _enterLearnSaveLocation();
-        void _runLearnSaveLocation();
-        void _enterLearnSaveFolderPicker();
-        void _runLearnSaveFolderPicker();
-        void _enterLearnSaveFolderName();
-        void _runLearnSaveFolderName();
-        void _enterLearnSaveExistingConfirm();
-        void _runLearnSaveExistingConfirm();
-
-        void _enterRemoteList();
-        void _runRemoteList();
-        void _goUpRemoteDir();
-        void _enterDeleteConfirm();
-        void _runDeleteConfirm();
-
-        void _enterRemoteView();
-        void _runRemoteView();
-
-        void _enterUniversalMenu();
-        void _runUniversalMenu();
-
-        void _enterUniversalTV();
-        void _runUniversalTV();
-        void _runUniversalBlast(const char* triggerLabel);
-
-        void _enterTVBGone();
-        void _runTVBGone();
-        void _drawTVBGoneFrame();
-        void _drawTVBGoneFooter();
-
-        void _enterSending();
-        void _runSending();
-
-        /* ── File I/O (Flipper .ir format) ── */
-        bool _loadRemote(const char* path, IrRemote& remote, int maxSignals = 0, const char* filterName = nullptr);
-        bool _saveSignalToFile(const char* dir, const char* remoteName, const IrSignal& sig);
-        bool _appendSignalToFile(const char* path, const IrSignal& sig);
-        void _listIrFiles(const char* dir, std::vector<String>& out, bool includeFolders = false);
-        bool _isDirectoryEmpty(const char* path);
-
-        /* ── IR hardware ── */
-        IRrecv*  _irRecv  = nullptr;
-        IRsend*  _irSend  = nullptr;
-
-        void _txSignal(const IrSignal& sig);
-        void _startRx();
-        void _stopRx();
-
-        /* ── State ── */
-        int  _menuSel      = 0;
-        int  _menuCount    = 0;
-        int  _scrollOffset = 0;
-
-        IrSignal  _learnedSig;
-        IrRemote  _currentRemote;
-        std::vector<String> _fileList;
-        char      _remoteDir[96];   /* current folder being browsed in Saved Remotes, e.g. "/infrared" or "/infrared/tv" */
-        char      _saveDir[96];     /* destination for a learned signal */
-        char      _savePickerDir[96];
-        char      _savePath[128];
-        char      _deletePath[128];
-        bool      _deleteFolder = false;
-        bool      _saveFolderPending = false;
-        bool      _restoreFolderName = false;
-        bool      _preserveSignalName = false;
-
-        /* save-name editor */
-        char _editBuf[24];
-        int  _editPos;
-        int  _editCharIdx;
-        int  _vkSel = 0;
-
-        /* Learn page icon cache (PNG bytes loaded from SD once) */
-        uint8_t* _learnIconPng = nullptr;
-        size_t   _learnIconLen = 0;
-        bool     _learnIconTried = false;
-
-        /* universal remote */
-        std::vector<String>  _univActions;      /* unique signal names from loaded .ir */
-        std::vector<int>     _univBlastQ;       /* indices into _currentRemote.signals to blast */
-        int                  _univBlastIdx = 0; /* current position in _univBlastQ */
-        bool                 _univBlasting = false;
-        char                 _univBlastName[32]; /* action being blasted */
-        char                 _univCatTitle[32];  /* category label for header */
-
-        /* virtual-remote grid navigation (directional, not touch) */
-        int  _vbSel = 0;            /* selected button index in current grid */
-
-        /* TV-B-Gone state */
-        enum class TvbgState : uint8_t { Idle, Running, Paused };
-        TvbgState     _tvbgState    = TvbgState::Idle;
-        int           _tvbgIdx       = 0;     /* next signal index to send / currently displayed */
-        int           _tvbgTotal     = 0;     /* total signals in tv.ir */
-        bool          _tvbgPaused    = false; /* deprecated, kept for ABI; mirrors state==Paused */
-        unsigned long _tvbgLastSend  = 0;     /* millis() of last send */
-        unsigned long _tvbgGapMs     = 250;   /* gap between sends */
-
-        /* sending overlay */
-        const char* _sendLabel = nullptr;
-        uint32_t    _sendStart = 0;
-    };
-}
+    bool _loadRemote(const String& path);
+    bool _writeRemote(const String& path, const std::vector<meow_ir::Signal>& signals, bool create);
+    bool _beginLibraryLoad(const String& path, Scene destination);
+    void _runLibraryLoad();
+    void _failLibraryLoad(const String& error);
+    bool _readRecord(const LibraryRecord& record, meow_ir::Signal& signal);
+    bool _renameRemote(const char* name);
+    bool _emptyDirectory(const String& path);
+    void _startRx();
+    void _stopRx();
+    bool _startTx(const meow_ir::Signal& signal, bool repeat = false);
+    void _stopTx();
+    void _runHeld(const meow_ir::Signal& signal);
+    static void _txEntry(void* context);
+    void _txWorker();
+};
+} // namespace MOONCAKE::APPS

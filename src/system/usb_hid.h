@@ -11,6 +11,7 @@
  * All lifecycle is driven through usb_manager_request() / _release().
  */
 #pragma once
+#include "usb_hid_status.h"
 
 #ifdef __cplusplus
 #if ARDUINO_USB_MODE == 0
@@ -43,6 +44,15 @@ int  usb_hid_connected(void);
 
 /** Keyboard LED state from host (NUM_LOCK / CAPS_LOCK / SCROLL_LOCK bits). */
 uint8_t usb_hid_leds(void);
+
+/** Checked reports: wait for endpoint readiness with a finite deadline. */
+bool usb_hid_send_keyboard(const uint8_t report[8]);
+bool usb_hid_send_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t wheel);
+bool usb_hid_send_consumer(uint16_t usage);
+/** Explicit user recovery: re-enumerate the current composite, no PHY/ROM reset. */
+bool usb_hid_reconnect(void);
+usb_hid_tx_info_t usb_hid_last_tx(void);
+const char* usb_hid_tx_message(usb_hid_tx_status_t status);
 
 #ifdef __cplusplus
 }

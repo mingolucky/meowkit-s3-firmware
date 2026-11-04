@@ -5,6 +5,14 @@
 #include <cstdlib>
 
 namespace infrared_file {
+// Button names are signal labels, not filesystem components. Preserve every
+// printable ASCII symbol; leading/trailing spaces would be trimmed on reload.
+inline bool validButtonName(const char* name) {
+    if (!name || !*name || name[0] == ' ' || name[std::strlen(name) - 1] == ' ') return false;
+    for (const char* p = name; *p; ++p)
+        if (static_cast<unsigned char>(*p) < 32 || static_cast<unsigned char>(*p) > 126) return false;
+    return true;
+}
 // Device-entered names are single FAT path components, never paths.
 inline bool validName(const char* name) {
     if (!name || !*name || !std::strcmp(name, ".") || !std::strcmp(name, "..")) return false;

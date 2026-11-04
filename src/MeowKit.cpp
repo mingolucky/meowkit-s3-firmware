@@ -7,9 +7,11 @@
 #include "system/settings_bridge.h"
 #include "system/system_sound.h"
 #include "system/system_sound_assets.h"
+#include "system/usb_manager.h"
 
 bool MeowKit::Setup()
 {
+    usb_manager_init();
     _device = std::make_unique<DEVICES>();
     if (!_device) {
         printf("[MeowKit] BSP create failed\n");
@@ -33,6 +35,7 @@ bool MeowKit::Setup()
 
 void MeowKit::Loop()
 {
+    usb_manager_poll();
     if (_launcher) {
         _launcher->onLoop();
     }

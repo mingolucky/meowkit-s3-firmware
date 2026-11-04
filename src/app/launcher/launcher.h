@@ -51,6 +51,8 @@ private:
     void installApps();
     void loadAppsMenu();
     void handleAppSelection();
+    void updateRunningApp();
+    void closeRunningApp();
     void handlePhysicalNav();    /* detect button edges → drive navigation */
     void processNavEvents();     /* consume one external navigation event */
     void handleNavigationEvent(mk_event_t evt);
