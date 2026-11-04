@@ -8,6 +8,10 @@
 __pycache__/
 *.py[cod]
 
+# Local verification sources are not part of firmware releases
+/test/
+/tests/
+
 # Operating system files
 .DS_Store
 Thumbs.db

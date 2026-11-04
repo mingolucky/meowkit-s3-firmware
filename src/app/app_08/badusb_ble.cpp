@@ -1,9 +1,6 @@
 // Static composite HID GATT lifecycle: authenticated PIN pairing, bounded report
 // pipeline, and explicit application-owned state. No BLEServer objects retained.
 #include "badusb_ble.h"
-#ifdef BADUSB_BLE_HOST_TEST
-#include "../../../test/badusb/stubs/ble_platform.h"
-#else
 #include "../../system/bluetooth_manager.h"
 #include <Arduino.h>
 #include <BLEDevice.h>
@@ -11,7 +8,6 @@
 #include <esp_gatts_api.h>
 #include <esp_bt_device.h>
 #include <esp_system.h>
-#endif
 #include "badusb_keyboard.h"
 namespace keyboard_transport { bool ready(); }
 #include <atomic>

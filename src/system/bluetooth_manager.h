@@ -1,11 +1,7 @@
 #pragma once
 #include <cstdint>
-#ifdef BLUETOOTH_MANAGER_HOST_TEST
-#include "../../test/bluetooth_manager_stubs.h"
-#else
 #include <esp_gap_ble_api.h>
 #include <esp_gatts_api.h>
-#endif
 
 // Lifecycle operations belong to the launcher task, never a BLE callback.
 namespace bluetooth_manager {

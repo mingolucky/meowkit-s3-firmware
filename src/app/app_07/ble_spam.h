@@ -15,9 +15,6 @@
  *       in the same green/white style used by app_08 (Bad USB).
  */
 #pragma once
-#ifdef APP07_HOST_TEST
-#include "../../../test/app07_ui_stubs.h"
-#else
 #include <mooncake.h>
 #include "../../bsp/devices.h"
 #include <BLEDevice.h>
@@ -25,8 +22,6 @@
 #include <BLEServer.h>
 #include <esp_arduino_version.h>
 #include <LovyanGFX.hpp>
-
-#endif
 
 /* ── Max TX power per chip variant ── */
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32S3)

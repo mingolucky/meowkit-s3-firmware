@@ -9,15 +9,11 @@
  * @copyright Copyright (c) 2025
  */
 #pragma once
-#ifdef BADUSB_HOST_TEST
-#include "../../../test/badusb/stubs/platform.h"
-#else
 #include <mooncake.h>
 #include "../../bsp/devices.h"
 #include "../app_common/hp_ui.h"
 #include "../../system/usb_hid.h"
 #include "../../system/usb_manager.h"
-#endif
 #include <vector>
 #include <string>
 #include "badusb_keyboard.h"

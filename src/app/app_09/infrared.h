@@ -3,15 +3,11 @@
  * Upstream: Next-Flip/Momentum-Firmware, applications/main/infrared (GPL-3.0).
  */
 #pragma once
-#ifdef MEOW_IR_HOST_TEST
-#include "../../../test/infrared/stubs/platform.h"
-#else
 #include <mooncake.h>
 #include "../../bsp/devices.h"
 #include <IRrecv.h>
 #include <IRsend.h>
 #include <SD_MMC.h>
-#endif
 #include "../app_common/hp_ui.h"
 #include "infrared_signal.h"
 #include <atomic>

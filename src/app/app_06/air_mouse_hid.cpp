@@ -1,13 +1,9 @@
 #include "air_mouse_hid.h"
-#ifdef AIR_MOUSE_HID_HOST_TEST
-#include "../../../test/air_mouse_hid_stubs.h"
-#else
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <esp_gap_ble_api.h>
 #include <esp_gatts_api.h>
 #include <esp_bt_device.h>
-#endif
 #include <atomic>
 #include <cstring>
 
