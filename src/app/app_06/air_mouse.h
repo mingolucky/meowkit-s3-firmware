@@ -29,7 +29,7 @@ private:
     uint32_t _b_since = 0;
     const char* _last_status = nullptr;
     void _drawStaticUI();
-    void _calibrate();
+    void _calibrate(uint32_t now);
     void _sample(uint32_t now);
     void _inputs(uint32_t now);
     void _updateUI();

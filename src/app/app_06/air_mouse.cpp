@@ -50,7 +50,10 @@ void App06::onOpen() {
             if(prefs.getBytes("bias",saved,sizeof(saved))==sizeof(saved)) {
                 bool valid=true;
                 for(float v:saved) valid &= std::isfinite(v) && std::fabs(v)<10.f;
-                if(valid) std::copy(saved,saved+3,_bias);
+                if(valid) {
+                    std::copy(saved,saved+3,_bias);
+                    _calibrated=true;
+                }
             }
         }
         prefs.end();
@@ -63,15 +66,17 @@ void App06::onOpen() {
     _globe.setColorDepth(16); _globe.setPsram(true); _globe.createSprite(170,142);
     _drawStaticUI();
     air_mouse_hid::begin();
-    if(_imu_ready) _calibrate();
+    if(_imu_ready) _calibrate(millis());
     _updateUI();
 }
-void App06::_calibrate() {
+void App06::_calibrate(uint32_t now) {
     if(!_imu_ready) return;
     air_mouse_hid::buttons(0);
     _a_armed=_b_armed=false; _a_down=_b_down=false;
-    _cal.reset(); _calibrating=true; _calibrated=false;
-    _cal_start=millis(); _still_since=0; _motion.clear(); _wheel=0; _ui_dirty=true;
+    // Keep the last valid bias until a new attempt succeeds. Use the same
+    // clock sample as the timeout check when calibration starts mid-tick.
+    _cal.reset(); _calibrating=true;
+    _cal_start=now; _still_since=0; _motion.clear(); _wheel=0; _ui_dirty=true;
 }
 void App06::_setSpeed(uint8_t speed) {
     if(_speed==speed) return;
@@ -121,7 +126,7 @@ void App06::_handleTouch(uint32_t now) {
         if(!canScroll) { _scroll_active=false; _touch_y=-1; }
         if(!_touch_down) {
             if(y>=194 && y<214) {
-                if(x>=160) _calibrate(); else _setSpeed((_speed+1)%3);
+                if(x>=160) _calibrate(now); else _setSpeed((_speed+1)%3);
                 _ignore_until=now+100; _motion.clear();
             } else if(canScroll && x>=SX && x<SX+SW && y>=SY && y<SY+SH) {
                 _scroll_active=true; _touch_y=y; _motion.clear();
@@ -165,12 +170,13 @@ void App06::_sample(uint32_t now) {
                 prefs.putBytes("bias",_bias,sizeof(_bias)); prefs.putUInt("calver",1); prefs.end();
             }
             _motion.clear(); _ignore_until=now+100;
+            return;
         }
-        return;
     }
     if(!_calibrated) return;
+    // Continue pointing with the last good bias while recalibrating.
     const bool still=std::fabs(acc-1)<.03f && w[0]*w[0]+w[1]*w[1]+w[2]*w[2]<.0064f;
-    if(still && !_a_down && !_b_down && !_touch_down) {
+    if(!_calibrating && still && !_a_down && !_b_down && !_touch_down) {
         if(!_still_since) _still_since=now;
         if(now-_still_since>2000) for(int i=0;i<3;++i) _bias[i]+=w[i]*std::min(dt/30.f,.001f);
     } else _still_since=0;
@@ -187,7 +193,7 @@ void App06::onRunning() {
     if(_calibrating && now-_cal_start>=8000) {
         Serial.printf("[App06] Calibration timeout: samples=%u, mean=%.3f %.3f %.3f dps\n",
             _cal.count,_cal.mean[0],_cal.mean[1],_cal.mean[2]);
-        _calibrating=false; _calibrated=false; _ui_dirty=true;
+        _calibrating=false; _ui_dirty=true;
     }
     if(now-_last_gyro>250) _motion.clear();
     // Buttons and scrolling do not depend on the motion sensor or calibration.
