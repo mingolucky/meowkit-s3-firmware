@@ -103,8 +103,10 @@ void App06::_inputs(uint32_t now) {
     _a_down=a; _b_down=right;
     if(b.Left.pressed()) _setSpeed(_speed>0?_speed-1:0);
     if(b.Right.pressed()) _setSpeed(_speed<2?_speed+1:2);
-    int direction=(b.Up.state()==Button_Class::PRESSED?1:0)-(b.Down.state()==Button_Class::PRESSED?1:0);
-    if(direction && ready && (direction!=_last_direction || now-_wheel_at>=160)) {
+    const bool canScroll=air_mouse_hid::scrollReady();
+    if(!canScroll) _wheel=0;
+    const int direction=canScroll ? (b.Up.state()==Button_Class::PRESSED?1:0)-(b.Down.state()==Button_Class::PRESSED?1:0) : 0;
+    if(direction && (direction!=_last_direction || now-_wheel_at>=160)) {
         _wheel=std::max(-12,std::min(12,_wheel+direction)); _wheel_at=now;
     }
     _last_direction=direction;
@@ -112,22 +114,22 @@ void App06::_inputs(uint32_t now) {
     _handleTouch(now);
 }
 void App06::_handleTouch(uint32_t now) {
-    const bool down=_device->ctp.isTouched();
+    int x=-1,y=-1;
+    const bool down=_device->ctp.readPoint(x,y) && x>=0 && x<=320 && y>=0 && y<240;
     if(down) {
-        int x=-1,y=-1; _device->ctp.getPos(x,y);
-        if(x<0 || x>=320 || y<0 || y>=240) return;
+        const bool canScroll=air_mouse_hid::scrollReady();
+        if(!canScroll) { _scroll_active=false; _touch_y=-1; }
         if(!_touch_down) {
             if(y>=194 && y<214) {
                 if(x>=160) _calibrate(); else _setSpeed((_speed+1)%3);
                 _ignore_until=now+100; _motion.clear();
-            } else if(x>=SX && x<SX+SW && y>=SY && y<SY+SH) {
+            } else if(canScroll && x>=SX && x<SX+SW && y>=SY && y<SY+SH) {
                 _scroll_active=true; _touch_y=y; _motion.clear();
             }
         } else if(_scroll_active && _touch_y>=0) {
             const int steps=(y-_touch_y)/10;
             if(steps) {
-                if(air_mouse_hid::ready())
-                    _wheel=std::max(-12,std::min(12,_wheel-steps));
+                _wheel=std::max(-12,std::min(12,_wheel-steps));
                 _touch_y+=steps*10;
             }
         }

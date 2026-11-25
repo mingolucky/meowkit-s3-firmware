@@ -92,11 +92,8 @@ class CTP_Class {
             _y_pos = -1;
         }
 
-        inline void _update_coor()
+        inline void _decode_coor(const uint8_t* buff)
         {
-            uint8_t buff[4];
-            _I2C_readBuff(0x03, 4, buff);
-
             #if CTP_REVERS_XY
                 _y_pos = ((buff[0]&0x0F) << 8) | buff[1];
                 _x_pos = ((buff[2]&0x0F) << 8) | buff[3];
@@ -110,6 +107,15 @@ class CTP_Class {
                 _x_pos = ((buff[0]&0x0F) << 8) | buff[1];
                 _y_pos = ((buff[2]&0x0F) << 8) | buff[3];
             #endif
+        }
+
+        inline void _update_coor()
+        {
+            uint8_t buff[4];
+            if (_i2c->readRegister(_dev_addr, 0x03, buff, sizeof(buff), CTP_I2C_FREQ))
+                _decode_coor(buff);
+            else
+                _reset_coor();
         }
 
     public:
@@ -140,6 +146,20 @@ class CTP_Class {
         {
             if (!_enable) return false;
             return _I2C_read8Bit(0x02) ? true : false;
+        }
+
+        // Read the contact count and first contact from the same I2C sample.
+        inline bool readPoint(int& x, int& y)
+        {
+            uint8_t sample[5];
+            if (!_enable || !_i2c->readRegister(_dev_addr, 0x02, sample, sizeof(sample), CTP_I2C_FREQ))
+                return false;
+            const uint8_t contacts = sample[0] & 0x0f;
+            if (contacts == 0 || contacts > 2 || (sample[1] >> 6) == 1) return false;
+            _decode_coor(sample + 1);
+            x = _x_pos;
+            y = _y_pos;
+            return true;
         }
 
         inline void getPos(int& x_pos, int& y_pos)
