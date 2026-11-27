@@ -10,6 +10,8 @@ using namespace meow_ir::ui;
 App09::App09(DEVICES* device) : _device(device) { setAppInfo().name = "Infrared"; }
 
 void App09::onOpen() {
+    _savedSearch.clear(); _savedCheckUnavailable=false; _savedAdvancePending=false;
+    _libraryBrowser=false; _saveScanToExisting=false; _scanSignal={};
     _signals.clear(); _records.clear(); _actions.clear(); _queue.clear(); _history.clear();
     _moveBackup.clear(); _entries.clear();
     _remotePath = _remoteName = "";
@@ -17,20 +19,19 @@ void App09::onOpen() {
     _mainSelected = _universalSelected = 0;
     _scan = {}; _scanPending = false; _holdLatched = false;
     _learned = {}; _rxEnabled = false;
+    _powerLearning=_powerHaveOn=false; _powerOn={}; _powerPress={}; _powerSignalIndex=-1;
     _ledActive = _ledOn = false;
     _device->led.off();
-    _sender = new IRsend(HAL_PIN_IR_TX);
+    _sender = new meow_ir::PwmIRsend(HAL_PIN_IR_TX);
     _sender->begin();
     _receiver = new IRrecv(HAL_PIN_IR_RX, meow_ir::MaxTimings + 1, 150, true);
     _decoder = infrared_alloc_decoder();
     _txShutdown.store(false); _txCancel.store(false); _txBusy.store(false);
     _txSucceeded.store(true); _txStopped.store(false);
-    if (xTaskCreate(_txEntry, "MeowIR-TX", 4096, this, 1, &_txTask) != pdPASS) {
+    if (xTaskCreatePinnedToCore(_txEntry, "MeowIR-TX", 4096, this, 3, &_txTask, ARDUINO_RUNNING_CORE) != pdPASS) {
         _txTask = nullptr; _txStopped.store(true);
     }
-    if (SD_MMC.cardType() != CARD_NONE) {
-        SD_MMC.mkdir("/infrared"); SD_MMC.mkdir("/infrared/remote");
-    }
+    _storageReady();
     _readSettings();
     _setScene(Scene::Main);
     _draw();
@@ -43,7 +44,9 @@ void App09::onRunning() {
     if (_dirty) _draw();
 }
 void App09::onClose() {
+    _savedSearch.clear();
     _loadingFile.close();
+    meow_ir::releaseBuiltinCache();
     _stopRx(); _stopTx(); _txShutdown.store(true);
     if (_txTask) {
         xTaskNotifyGive(_txTask);
@@ -56,10 +59,15 @@ void App09::onClose() {
     _decoder = nullptr;
     _device->led.off();
     _signals.clear(); _learned = {}; _txSignal = {};
+    _powerOn={}; _powerLearning=_powerHaveOn=false; _powerPress={}; _powerSignalIndex=-1;
+    _scanSignal={}; _saveScanToExisting=false;
     _records.clear(); _queue.clear(); _actions.clear(); _moveBackup.clear();
     _entries.clear(); _items.clear(); _history.clear();
 }
 void App09::_setScene(Scene scene) {
+    if(scene!=Scene::Result) _savedAdvancePending=false;
+    const bool matchInfo=scene==Scene::Message && (_scene==Scene::Result || _scene==Scene::SavedMatches);
+    if(scene!=Scene::Result && scene!=Scene::SavedMatches && !matchInfo) _savedSearch.cancel();
     if (_scene == Scene::Loading) _loadingFile.close();
     _stopRx(); _stopTx();
     _scene = scene; _selected = _top = 0;
@@ -68,13 +76,14 @@ void App09::_setScene(Scene scene) {
     _enter();
 }
 void App09::_push(Scene scene) {
-    _history.push_back({_scene, _selected, _top, _directory});
+    _history.push_back({_scene, _selected, _top, _directory,_libraryBrowser,_saveScanToExisting});
     _setScene(scene);
 }
 void App09::_pop() {
     if (_history.empty()) { _setScene(Scene::Main); return; }
     auto frame = _history.back(); _history.pop_back();
     _directory = frame.directory;
+    _libraryBrowser=frame.libraryBrowser; _saveScanToExisting=frame.saveDestination;
     _setScene(frame.scene);
     _selected = frame.selected; _top = frame.top;
     if (!_items.empty()) meow_ir::listMove(0, _items.size(), _listVisible(), _selected, _top);
@@ -84,12 +93,14 @@ void App09::_returnTo(Scene scene) {
         if (_history[i].scene != scene) continue;
         auto frame = _history[i]; _history.resize(i);
         _directory = frame.directory;
+        _libraryBrowser=frame.libraryBrowser; _saveScanToExisting=frame.saveDestination;
         _setScene(scene);
         _selected = frame.selected; _top = frame.top;
         if (!_items.empty()) meow_ir::listMove(0, _items.size(), _listVisible(), _selected, _top);
         return;
     }
     _history.clear();
+    _libraryBrowser=false; _saveScanToExisting=false;
     if (scene != Scene::Main) _history.push_back({Scene::Main, _mainSelected, 0, "/infrared"});
     _setScene(scene);
 }
@@ -120,6 +131,7 @@ void App09::_sampleInput() {
         return;
     }
     _input.a = a; _input.b = back; _input.held = held;
+    _input.rightEdge=right;
     if (_scene != Scene::Learn && _scene != Scene::Result) {
         const uint32_t now = millis();
         up = _directionRepeat[0].poll(b.Up.state() == Button_Class::PRESSED, up, now);
@@ -135,13 +147,15 @@ void App09::_enter() {
         case Scene::Main:
             _items = {{"Universal Remotes", ""},
                       {"Learn New Remote", ""},
-                      {"Saved Remotes", ""}};
+                      {"Saved Remotes", ""}, {"Learn Power Toggle","Capture separate On and Off"}};
             _selected = _mainSelected; break;
         case Scene::Files: _refreshFiles(); break;
         case Scene::Remote:
-            for (const auto& s : _signals) _items.push_back({s.name.c_str(), protocolName(s)});
+            for (const auto& s : _signals) _items.push_back({s.name.c_str(),s.powerOff?
+                (s.powerNextOn?"Next: On  |  > change":"Next: Off  |  > change"):protocolName(s)});
             _items.push_back({"+ Add Button", "Learn into this remote"});
-            _items.push_back({"Edit", "Rename / reorder / delete"}); break;
+            _items.push_back({"Edit", "Rename / reorder / delete"});
+            _items.push_back({"+ Power Toggle","Learn On and Off into one button"}); break;
         case Scene::Edit:
             _items = {{"Add Button", "Learn into this remote"}, {"Rename Button", "Change a button name"},
                 {"Move Button", "Change button order"}, {"Delete Button", "Remove one signal"},
@@ -156,6 +170,14 @@ void App09::_enter() {
             _selected = _universalSelected; break;
         case Scene::Actions:
             for (const auto& action : _actions) _items.push_back({action, "Scan every matching record"});
+            break;
+        case Scene::SaveScan:
+            _items={{"Create new remote","Name it and save this button"},
+                    {"Add to saved remote","Keep its existing buttons"}};
+            break;
+        case Scene::SavedMatches:
+            for(const auto& match:_savedSearch.matches)
+                _items.push_back({match.remote.c_str(),match.button.c_str()});
             break;
         default: break;
     }

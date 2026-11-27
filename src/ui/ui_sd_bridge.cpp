@@ -7,38 +7,33 @@
 #include <Arduino.h>
 #include <SD_MMC.h>
 #include <string.h>
+#include "../bsp/sdmmc/SDMMC_Class.hpp"
+#include "../system/usb_msc.h"
+#include "../system/sd_partition_mount.h"
+
+extern "C" int ui_sd_recovery_blocked(void) { return sdPartitionBlocked()?1:0; }
 
 extern "C" int ui_sd_present(void)
 {
-    /* Actively probe — SD_MMC.cardType() is a cached value that does not
-     * notice hot removals. Opening "/" forces a bus transaction. */
-    File root = SD_MMC.open("/");
-    if (!root) {
-        /* Open failed: card may have been removed then reinserted.
-         * Try to remount with the same parameters used at boot. */
-        SD_MMC.end();
-        if (!SD_MMC.begin("/sdcard", true, false, 10000)) return 0;
-        root = SD_MMC.open("/");
-        if (!root) return 0;
-    }
-    bool ok = root.isDirectory();
-    root.close();
-    return ok ? 1 : 0;
+    if (usb_msc_is_active()) return 1;
+    return sdmmcEnsureReady()?1:0;
 }
 
 extern "C" uint64_t ui_sd_total_bytes(void)
 {
+    if (usb_msc_is_active()) return 0;
     return SD_MMC.totalBytes();
 }
 
 extern "C" uint64_t ui_sd_used_bytes(void)
 {
+    if (usb_msc_is_active()) return 0;
     return SD_MMC.usedBytes();
 }
 
 extern "C" int ui_sd_list_dir(const char* path, ui_sd_visit_cb cb, void* user)
 {
-    if (!path || !cb) return -1;
+    if (!path || !cb || usb_msc_is_active()) return -1;
 
     File dir = SD_MMC.open(path);
     if (!dir) return -1;

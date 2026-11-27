@@ -26,7 +26,9 @@ struct Motion {
     }
     Report pending() const {
         const float scale = std::max(1.f, std::max(std::fabs(x), std::fabs(y)) / 127.f);
-        return {static_cast<int>(std::round(x / scale)), static_cast<int>(std::round(y / scale))};
+        // Only send whole counts. Rounding +0.5 to +1 leaves -0.5, which
+        // would send -1 on the next tick and oscillate even at rest.
+        return {static_cast<int>(x / scale), static_cast<int>(y / scale)};
     }
     void sent(Report r) { x -= r.x; y -= r.y; }
 };

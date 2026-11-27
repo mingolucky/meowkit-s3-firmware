@@ -45,13 +45,18 @@ void App09::_drawButton(int x, int y, int w, int h, const char* label,
 void App09::_drawList(const char* title, const char* action) {
     auto& lcd = _device->Lcd;
     hp::drawHeader(lcd, title, _drawnTxBusy ? "TX" : nullptr, hp::COL_WARN);
-    _drawFooter(_scene == Scene::Files && !_libraryBrowser ? "^v R:Del" : "[^v]Select", action,
+    _drawFooter(_scene == Scene::Files && !_libraryBrowser && !_saveScanToExisting ? "^v R:Del" : "[^v]Select", action,
                 _scene == Scene::Main ? "Exit" : "Back");
     const int count = _items.size();
     const bool single = _singleLineList();
     const int visible = _listVisible();
     meow_ir::listMove(0, count, visible, _selected, _top);
     if (!count) {
+        if(_scene==Scene::SavedMatches) {
+            hp::drawDialog(lcd,_savedCheckUnavailable?"SD unavailable":_savedSearch.running()?"Checking saved remotes...":"No match in files checked",
+                _savedSearch.incomplete()?"Incomplete check; retry capture":"Exact command data comparison");
+            return;
+        }
         hp::drawDialog(lcd, "No items", _scene == Scene::Files ? "Check /infrared on SD" : "Learn a signal first");
         return;
     }
@@ -71,16 +76,23 @@ void App09::_draw() {
     lcd.setFont(&fonts::efontCN_16);
     switch (_scene) {
         case Scene::Main: _drawList("Infrared", "Enter"); break;
-        case Scene::Files: _drawList(_libraryBrowser ? "Library File" : "Saved Remotes"); break;
-        case Scene::Remote: _drawList(clipped(_remoteName, 24).c_str(), _selected < int(_signals.size()) ? "Hold" : "Enter"); break;
+        case Scene::Files: _drawList(_saveScanToExisting?"Add Signal To":_libraryBrowser ? "Library File" : "Saved Remotes"); break;
+        case Scene::SaveScan: _drawList("Save Working Signal","Choose"); break;
+        case Scene::SavedMatches:
+            _drawList(_savedSearch.running()?"Saved Matches (checking)":
+                _savedSearch.incomplete()?"Saved Matches (partial)":"Saved Command Matches","File"); break;
+        case Scene::Remote: _drawList(clipped(_remoteName, 24).c_str(), _selected < int(_signals.size()) ?
+            (_signals[_selected].powerOff?"Send":"Hold") : "Enter"); break;
         case Scene::Edit: _drawList("Edit Remote", "Select"); break;
         case Scene::ButtonSelect: _drawList(_editFor == EditFor::Rename ? "Rename Button" : "Delete Button", "Select"); break;
         case Scene::Move: _drawList(_moveIndex < 0 ? "Move: Pick Button" : "Move: Up / Down", _moveIndex < 0 ? "Pick" : "Save"); break;
         case Scene::Universal: _drawList("Universal Remotes", "Enter"); break;
         case Scene::Actions: _drawList(clipped(_libraryTitle, 24).c_str(), "Scan"); break;
         case Scene::Name:
-            hp::drawHeader(lcd, _nameFor == NameFor::Learn ? "Name the Button" :
-                _nameFor == NameFor::Button ? "Rename Button" : "Rename Remote");
+            hp::drawHeader(lcd, _nameFor == NameFor::Power ? "Name Power Toggle" : _nameFor == NameFor::Learn ? "Name the Button" :
+                _nameFor == NameFor::Button ? "Rename Button" :
+                _nameFor == NameFor::ScanButton ? "Name the Button" :
+                _nameFor == NameFor::ScanRemote ? "Name New Remote" : "Rename Remote");
             _drawFooter("^v<> Move", _key == KeySave ? "Save" : "Key", "Back");
             _drawNameKeyboard();
             break;
@@ -90,31 +102,53 @@ void App09::_draw() {
             hp::drawHourglassScreen(lcd, clipped(_libraryTitle).c_str(), millis() / 8);
             break;
         case Scene::Learn:
-            hp::drawHeader(lcd, "Learn Signal", "RX", hp::COL_WARN);
-            _drawFooter("L:Mode R:Decode", _easy ? "Skip" : "", "Back");
+            hp::drawHeader(lcd, _powerLearning?(_powerHaveOn?"Learn Power: OFF":"Learn Power: ON"):"Learn Signal", "RX", hp::COL_WARN);
+            _drawFooter(_powerLearning?"R:Decode":"L:Mode R:Decode", _easy ? "Skip" : "", "Back");
             lcd.setTextColor(hp::COL_FG, hp::COL_BG);
             lcd.setCursor(12, 40); lcd.print("Point remote at IR port");
-            lcd.setCursor(12, 62); lcd.print("and press a button");
+            lcd.setCursor(12, 62); lcd.print(_powerLearning?
+                (_powerHaveOn?"Remote ON: press power OFF":"Remote OFF: press power ON"):"and press a button");
             lcd.setTextColor(hp::COL_ACCENT, hp::COL_BG);
             lcd.setCursor(12, 80); lcd.print(_easy ? EasyNames[_easyIndex] : "Waiting for signal...");
             hp::drawScanWave(lcd, 72, millis() / 8);
-            hp::drawStat(lcd, 5, "Mode", _easy ? "Easy" : "Manual");
+            hp::drawStat(lcd, 5, "Mode", _powerLearning?"Paired Power":_easy ? "Easy" : "Manual");
             hp::drawStat(lcd, 6, "Decoding", decodeName(_decodeMode));
             break;
         case Scene::Result: {
-            hp::drawHeader(lcd, "Signal Received", _drawnTxBusy ? "TX" : "OK", hp::COL_WARN);
-            _drawFooter("L:Retry R:Save", "Send", "Back");
+            hp::drawHeader(lcd, _powerLearning?(_powerHaveOn?"OFF Received":"ON Received"):"Signal Received", _drawnTxBusy ? "TX" : "OK", hp::COL_WARN);
+            _drawFooter(_powerLearning?"L:Retry R:Next":"L:Retry R:Save", "Send", "Back");
             char text[64];
             hp::drawStat(lcd, 0, "Protocol", protocolName(_learned), hp::COL_FG);
             if (_learned.raw) {
                 snprintf(text, sizeof(text), "%u", unsigned(_learned.timings.size())); hp::drawStat(lcd, 1, "Samples", text);
                 snprintf(text, sizeof(text), "%lu Hz", static_cast<unsigned long>(_learned.frequency)); hp::drawStat(lcd, 2, "Carrier", text);
                 snprintf(text, sizeof(text), "%.0f%%", double(_learned.duty * 100)); hp::drawStat(lcd, 3, "Duty", text);
+            } else if (!_learned.legacyProtocol.empty()) {
+                if(_learned.legacyState.empty()) {
+                    snprintf(text,sizeof(text),"0x%llX",static_cast<unsigned long long>(_learned.legacyValue)); hp::drawStat(lcd,1,"Code",text);
+                } else {
+                    snprintf(text,sizeof(text),"%u bytes",unsigned(_learned.legacyState.size())); hp::drawStat(lcd,1,"State",text);
+                }
+                snprintf(text,sizeof(text),"%u",unsigned(_learned.legacyBits)); hp::drawStat(lcd,2,"Bits",text);
             } else {
                 snprintf(text, sizeof(text), "0x%08lX", static_cast<unsigned long>(_learned.address)); hp::drawStat(lcd, 1, "Address", text);
                 snprintf(text, sizeof(text), "0x%08lX", static_cast<unsigned long>(_learned.command)); hp::drawStat(lcd, 2, "Command", text);
             }
-            lcd.setCursor(12, 178); lcd.print("Hold A to repeat");
+            lcd.setTextColor(hp::COL_ACCENT,hp::COL_BG);
+            lcd.setCursor(12,134);
+            if(!_savedSearch.matches.empty()) {
+                const auto& match=_savedSearch.matches.front();
+                lcd.print(clipped(String("Match: ")+match.remote.c_str(),35));
+                lcd.setCursor(12,154); lcd.print(clipped(String("Button: ")+match.button.c_str(),35));
+            } else {
+                lcd.print(_savedCheckUnavailable?"Saved check unavailable":
+                    _savedSearch.running()?"Checking saved remotes...":"No match in files checked");
+                if(_savedSearch.incomplete()) { lcd.setCursor(12,154); lcd.print("Saved check incomplete"); }
+            }
+            lcd.setTextColor(hp::COL_FG,hp::COL_BG);
+            lcd.setCursor(12,196); lcd.print("Down: View saved matches");
+            lcd.setCursor(12, 178); lcd.print(_savedAdvancePending?"R: Continue now (partial check)":_powerLearning?
+                (_powerHaveOn?"R: Save both as one Power":"R: Keep ON, then learn OFF"):"Hold A to repeat");
             break;
         }
         case Scene::Discard:
@@ -149,8 +183,9 @@ void App09::_draw() {
             hp::drawStat(lcd, 2, "State", _scan.paused ? "Paused / manual test" : "Scanning library");
             hp::drawProgress(lcd, 12, 126, 296, _scan.total ? float(current) / _scan.total : 0.0f, hp::COL_FG);
             if (_scan.paused) {
-                lcd.setCursor(12, 164); lcd.print("Left / Right: Select signal");
-                lcd.setCursor(12, 186); lcd.print("Up: Resume scanning");
+                lcd.setCursor(12, 158); lcd.print("Left/Right: Select   A: Test");
+                lcd.setCursor(12, 180); lcd.print("Down: Save working signal");
+                lcd.setCursor(12, 200); lcd.print("Up: Resume scanning");
             }
             break;
         }

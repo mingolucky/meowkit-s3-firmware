@@ -20,6 +20,7 @@
 #include <Audio.h>
 #include <driver/i2s.h>
 #include <driver/ledc.h>
+#include "sdmmc/SDMMC_Class.hpp"
 #include <SPI.h>
 #include <vector>
 #include <Preferences.h>
@@ -1444,7 +1445,7 @@ skip_display:
 
             /* ════ Phase 1: Mount & Card Info ════ */
             SD_MMC.setPins(HAL_PIN_SD_CLK, HAL_PIN_SD_CMD, HAL_PIN_SD_D0);
-            bool mounted = SD_MMC.begin("/sdcard", true, false, 10000);
+            bool mounted = sdmmcEnsureReady();
             uint8_t cardType = mounted ? SD_MMC.cardType() : CARD_NONE;
             bool card_ok = mounted && (cardType != CARD_NONE);
 
@@ -1635,7 +1636,7 @@ skip_display:
                                 SD_MMC.end();
                                 delay(200);
                                 SD_MMC.setPins(HAL_PIN_SD_CLK, HAL_PIN_SD_CMD, HAL_PIN_SD_D0);
-                                bool rm = SD_MMC.begin("/sdcard", true, false, 10000);
+                                bool rm = sdmmcEnsureReady();
                                 uint8_t ct = rm ? SD_MMC.cardType() : CARD_NONE;
                                 if (rm && ct != CARD_NONE) {
                                     remount_pass++;
@@ -1644,7 +1645,7 @@ skip_display:
                                     Serial.printf("[BBT 10] Remount #%d FAIL\n", r + 1);
                                     /* Re-mount for cleanup */
                                     SD_MMC.setPins(HAL_PIN_SD_CLK, HAL_PIN_SD_CMD, HAL_PIN_SD_D0);
-                                    SD_MMC.begin("/sdcard", true, false, 10000);
+                                    sdmmcEnsureReady();
                                     break;
                                 }
                             }

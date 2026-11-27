@@ -2,8 +2,7 @@
  * @file SDMMC_Class.hpp
  * @brief BSP SDMMC — auto-frequency negotiation for broad card compatibility.
  *
- * begin() tries descending frequencies until mount succeeds:
- *   40 MHz → 20 MHz → 10 MHz → 5 MHz  (1-bit, /sdcard)
+ * begin() probes an existing mount, or retries 10 / 5 / 1 MHz without formatting.
  * This covers SD / SDHC / SDXC / MMC and cheap generic cards that refuse
  * high-speed clocks.
  *
@@ -59,3 +58,6 @@ private:
     bool _tryMount(uint32_t freq_khz, bool mode4bit);
     CardType _mapCardType(uint8_t raw);
 };
+
+/** Shared mounting entry point for C bridges and apps without a DEVICES handle. */
+bool sdmmcEnsureReady();

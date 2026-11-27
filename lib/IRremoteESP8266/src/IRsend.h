@@ -12,7 +12,7 @@
 // Updated by markszabo (https://github.com/crankyoldgit/IRremoteESP8266) for
 // sending IR code on ESP8266
 
-#if TEST || UNIT_TEST
+#if TEST || UNIT_TEST || defined(ESP32)
 #define VIRTUAL virtual
 #else
 #define VIRTUAL
@@ -245,8 +245,8 @@ class IRsend {
  public:
   explicit IRsend(uint16_t IRsendPin, bool inverted = false,
                   bool use_modulation = true);
-  void begin();
-  void enableIROut(uint32_t freq, uint8_t duty = kDutyDefault);
+  VIRTUAL void begin();
+  VIRTUAL void enableIROut(uint32_t freq, uint8_t duty = kDutyDefault);
   VIRTUAL void _delayMicroseconds(uint32_t usec);
   VIRTUAL uint16_t mark(uint16_t usec);
   VIRTUAL void space(uint32_t usec);

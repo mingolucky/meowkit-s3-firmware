@@ -8,6 +8,7 @@ bool begin();
 void end();
 bool connected();
 bool ready();
+bool scrollReady();
 bool failed();
 void buttons(uint8_t mask);
 void clickRight();

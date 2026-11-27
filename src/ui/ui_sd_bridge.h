@@ -22,6 +22,8 @@ typedef void (*ui_sd_visit_cb)(const char* name, int is_dir, void* user);
 /* Active SD probe — opens "/" and verifies it is a directory.
  * Returns 1 if accessible, 0 otherwise. Safe to call ~1 Hz. */
 int ui_sd_present(void);
+/* Allows explicit USB raw-card recovery when filesystem writes are gated. */
+int ui_sd_recovery_blocked(void);
 
 /* Iterate a directory on the SD card.
  *  path : absolute path starting with "/", e.g. "/", "/config".
