@@ -43,6 +43,11 @@
  * ═══════════════════════════════════════════════════════
  */
 #include "launcher.h"
+#include "idle_power_policy.h"
+extern "C" {
+#include "ff.h"
+#include "diskio.h"
+}
 #include "../app.h"
 #include "../../bsp/porting/lv_port_disp.h"
 #include "../../bsp/porting/lv_port_indev.h"
@@ -59,6 +64,7 @@
 #include "../../system/system_sound.h"
 #include <Arduino.h>
 #include <SD_MMC.h>
+#include "../../system/sd_write_file.h"
 #include <lvgl.h>
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
@@ -365,14 +371,10 @@ void Launcher::onLoop()
             }
 
             /* Auto power-off after extended idle (2.5× display timeout, min 5 min).
-             * Guard: never power off while charging or while MSC session is live. */
-            uint32_t off_threshold = (disp_to > 0)
-                                     ? (uint32_t)disp_to * 5 / 2
-                                     : 300u;
-            if (off_threshold < 300u) off_threshold = 300u;
-            if (idle_s >= off_threshold
-                && !power_is_charging()
-                && !usb_msc_is_active()) {
+             * USB power remains present after a full battery stops charging.
+             * Critical-battery shutdown remains independently handled by power_tick. */
+            if (meowkit::shouldIdlePowerOff(idle_s,disp_to,power_is_charging(),
+                                            power_vbus_present(),usb_msc_is_active())) {
                 Serial.printf("[Launcher] Idle %lus — auto power-off\n",
                               (unsigned long)idle_s);
                 power_shutdown();
@@ -429,21 +431,19 @@ void Launcher::closeRunningApp()
 }
 
 /* ── SD card ───────────────────────────────────────── */
+static void probeSdWrites() {
+    char probeName[56],probeError[96]{};
+    snprintf(probeName,sizeof(probeName),".meowkit-probe-%08lx.tmp",(unsigned long)esp_random());
+    if (meow_storage::probe("/sdcard",probeName,probeError,sizeof(probeError)))
+        Serial.println("[SDMMC] Write/sync/readback probe OK");
+    else Serial.printf("[SDMMC] Write probe failed: %s\n",probeError);
+}
 
 void Launcher::initSD()
 {
     Serial.println("[Launcher] Mounting SD (SDMMC 1-bit)...");
 
-    /* Pin assignment */
-    if (!SD_MMC.setPins(HAL_PIN_SD_CLK, HAL_PIN_SD_CMD, HAL_PIN_SD_D0)) {
-        Serial.println("[Launcher] SD pin config failed");
-        _sd_ready = false;
-        return;
-    }
-
-    /* Try mounting — single attempt at safe speed, max ~5s timeout */
-    Serial.printf("[Launcher] SD attempt @ 10MHz (1-bit)...\n");
-    bool mounted = SD_MMC.begin("/sdcard", true, false, 10000);
+    bool mounted = _device->sd.begin();
 
     if (!mounted || SD_MMC.cardType() == CARD_NONE) {
         SD_MMC.end();
@@ -458,6 +458,22 @@ void Launcher::initSD()
                   (unsigned long long)(SD_MMC.totalBytes() / (1024 * 1024)),
                   (unsigned long long)(SD_MMC.usedBytes()  / (1024 * 1024)));
     _sd_ready = true;
+    // Read-only layout diagnostics: compare the mounted FAT volume with
+    // the physical MBR/BPB seen by USB hosts. Never repair or format here.
+    FATFS* layoutFs=nullptr; DWORD layoutFree=0;
+    if(f_getfree("0:",&layoutFree,&layoutFs)==FR_OK && layoutFs)
+        Serial.printf("[SD LAYOUT] volbase=%lu fatbase=%lu database=%lu clusters=%lu csize=%u\n",
+            (unsigned long)layoutFs->volbase,(unsigned long)layoutFs->fatbase,
+            (unsigned long)layoutFs->database,(unsigned long)layoutFs->n_fatent,unsigned(layoutFs->csize));
+    uint8_t layoutSector[512]; char layoutHex[1025];
+    for(const DWORD sector:{DWORD(0),DWORD(16)}) {
+        if(disk_read(0,layoutSector,sector,1)!=RES_OK) { Serial.printf("[SD LAYOUT] read %lu failed\n",(unsigned long)sector); continue; }
+        static const char digits[]="0123456789ABCDEF";
+        for(size_t i=0;i<sizeof(layoutSector);++i) { layoutHex[2*i]=digits[layoutSector[i]>>4]; layoutHex[2*i+1]=digits[layoutSector[i]&15]; }
+        layoutHex[1024]=0;
+        Serial.printf("[SD LAYOUT] sector=%lu hex=%s\n",(unsigned long)sector,layoutHex);
+    }
+    probeSdWrites();
 }
 
 /* ── Install apps ──────────────────────────────────── */
@@ -479,9 +495,7 @@ void Launcher::initLVGL()
     lv_port_disp_init(&_device->Lcd);
     lv_port_indev_init(&_device->ctp);
 
-    if (_sd_ready) {
-        lv_fs_fatfs_init();
-    }
+    lv_fs_fatfs_init(); // registers callbacks once; cards may arrive after boot
 
     _lvgl_inited = true;
 }
@@ -533,6 +547,7 @@ void Launcher::returnToUI()
 
 void Launcher::loadAppsMenu()
 {
+    static_assert(APP_BUILTIN_ICONS_COUNT<=APPS_MENU_MAX_APPS,"Increase launcher capacity for registered apps");
     auto allInfo = _mooncake.getAllAppInfo();
     int count = (int)allInfo.size();
     if (count > APPS_MENU_MAX_APPS) count = APPS_MENU_MAX_APPS;
@@ -588,6 +603,7 @@ void Launcher::updateStatusBar()
     {
         bool sd_present = (ui_sd_present() != 0);
         if (sd_present != _sd_ready) {
+            if (sd_present && !usb_msc_is_active()) probeSdWrites();
             mk_event_push(sd_present ? MK_EVT_SD_INSERTED : MK_EVT_SD_REMOVED);
         }
         _sd_ready = sd_present;
@@ -791,6 +807,10 @@ void Launcher::handleNavigationEvent(mk_event_t evt)
         if (a) {
             if (usb_msc_is_active()) {
                 usb_manager_release(USB_MODE_MSC);
+                if(usb_msc_is_active()) {
+                    if(ui_usb_msc_label) lv_label_set_text(ui_usb_msc_label,"Transfer busy - retry eject");
+                    return;
+                }
                 if (ui_usb_msc_label) lv_label_set_text(ui_usb_msc_label, "Ejected - safe to unplug");
                 Serial.println("[Launcher] MSC ejected via A");
             } else {
@@ -800,6 +820,10 @@ void Launcher::handleNavigationEvent(mk_event_t evt)
         }
         if (b) {
             usb_manager_release(USB_MODE_MSC);
+            if(usb_msc_is_active()) {
+                if(ui_usb_msc_label) lv_label_set_text(ui_usb_msc_label,"Transfer busy - retry eject");
+                return;
+            }
             _ui_screen_change(&ui_settings, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, &ui_settings_screen_init);
             return;
         }

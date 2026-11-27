@@ -1,5 +1,6 @@
 #include "infrared.h"
 #include <IRutils.h>
+#include "infrared_native_learn.h"
 
 namespace MOONCAKE::APPS {
 void App09::_updateLed() {
@@ -31,7 +32,11 @@ void App09::_receive() {
     if (!_rxEnabled) return;
     decode_results results;
     if (!_receiver->decode(&results)) return;
-    if (results.overflow || results.rawlen < 3) { _receiver->resume(); return; }
+    if (results.overflow || results.rawlen < 3) {
+        Serial.printf("[Infrared RX] rejected: overflow=%u rawlen=%u\n",
+            unsigned(results.overflow),unsigned(results.rawlen));
+        _receiver->resume(); return;
+    }
     meow_ir::Signal received;
     received.name = "Signal";
     received.raw = true;
@@ -48,8 +53,15 @@ void App09::_receive() {
     }
     const auto* tail = infrared_check_decoder_ready(_decoder);
     if (!found && tail && !tail->repeat) { decoded = *tail; found = true; }
-    if (_decodeMode == 1 && !found) { _receiver->resume(); return; }
-    if (_decodeMode != 2 && found) {
+    static_assert(kStateSizeMax<=meow_ir::MaxNativeStateBytes,"Increase native state limit for this library");
+    const bool stateProtocol=hasACState(results.decode_type);
+    const size_t stateBytes=stateProtocol?(size_t(results.bits)+7)/8:0;
+    const bool nativeFound = _decodeMode != 2 && results.decode_type != UNKNOWN &&
+        results.decode_type != UNUSED && !results.repeat && stateBytes<=kStateSizeMax &&
+        meow_ir::learnNative(received,typeToString(results.decode_type).c_str(),results.bits,
+            stateProtocol?0:results.value,stateProtocol?results.state:nullptr,stateBytes);
+    if (_decodeMode == 1 && !found && !nativeFound) { _receiver->resume(); return; }
+    if (_decodeMode != 2 && found && !nativeFound) {
         received.raw = false;
         received.protocol = decoded.protocol;
         received.address = decoded.address;
@@ -59,7 +71,14 @@ void App09::_receive() {
     if (!meow_ir::validSignal(received)) { _receiver->resume(); return; }
     _learned = std::move(received);
     _stopRx();
+    Serial.printf("[Infrared RX] native=%s bits=%u rawlen=%u mode=%u\n",
+        typeToString(results.decode_type).c_str(),unsigned(results.bits),
+        unsigned(results.rawlen),unsigned(_decodeMode));
+    // Preserve the actual capture in USB logs for diagnosing multipart AC
+    // frames, even before the user chooses a name or writes a remote file.
+    Serial.print(meow_ir::serialize(_learned).c_str());
     _push(Scene::Result);
+    _startSavedMatchSearch();
     _ledUntil = millis() + 200;
 }
 
@@ -85,7 +104,7 @@ void App09::_stopTx() {
 
 void App09::_runHeld(const meow_ir::Signal& signal) {
     if (!_txBusy && !_txSucceeded.exchange(true)) {
-        _message("Send Failed", "Unsupported legacy signal"); return;
+        _message("Send Failed", "Unsupported native signal"); return;
     }
     if (!_txTask && _input.a) { _message("TX Unavailable", "Cannot start infrared worker"); return; }
     if (_input.b) { _stopTx(); return; }
@@ -104,10 +123,19 @@ void App09::_txEntry(void* context) { static_cast<App09*>(context)->_txWorker();
 
 void App09::_txWorker() {
     auto* encoder = infrared_alloc_encoder();
+    // Keep toggle continuity across closing/reopening Infrared. Only this
+    // worker uses these states; repeats retain the current key-press bit.
+    static meow_ir::NativeToggleState rc5Toggle,rc6Toggle,rc6LongToggle;
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         if (_txShutdown.load()) break;
         const auto& signal = _txSignal;
+        _sender->resetFrameStatus();
+        Serial.printf("[Infrared TX] name=%s raw=%u timings=%u repeat=%u\n",
+            signal.name.c_str(),unsigned(signal.raw),unsigned(signal.timings.size()),unsigned(_txRepeat));
+        if(!signal.raw) Serial.printf("[Infrared TX] protocol=%s bits=%u value=0x%llX state_bytes=%u\n",
+            signal.protocol==InfraredProtocolUnknown?signal.legacyProtocol.c_str():infrared_get_protocol_name(signal.protocol),
+            unsigned(signal.legacyBits),static_cast<unsigned long long>(signal.legacyValue),unsigned(signal.legacyState.size()));
         bool ok = true;
         if (signal.raw) {
             _sender->enableIROut(signal.frequency, uint8_t(signal.duty * 100));
@@ -151,11 +179,34 @@ void App09::_txWorker() {
             }
             if (frames < minimum && !_txCancel.load()) ok = false;
         } else {
-            // Old MeowKit files with explicit value/bits retain their native sender.
+            // Native integer codes and multi-byte AC states retain their
+            // dedicated sender, including protocol-specific framing/repeats.
             const auto protocol = strToDecodeType(signal.legacyProtocol.c_str());
-            ok = protocol != UNKNOWN && _sender->send(protocol, signal.legacyValue, signal.legacyBits);
+            if (!signal.legacyState.empty()) {
+                uint8_t state[kStateSizeMax]{};
+                ok=protocol!=UNKNOWN && hasACState(protocol) && signal.legacyState.size()<=sizeof(state);
+                if(ok) {
+                    std::copy(signal.legacyState.begin(),signal.legacyState.end(),state);
+                    ok=_sender->send(protocol,state,uint16_t(signal.legacyState.size()));
+                }
+            } else {
+                uint64_t value=signal.legacyValue;
+                if(protocol==RC5 || protocol==RC5X)
+                    value=rc5Toggle.apply(value,_sender->toggleRC5(0),_txRepeat);
+                else if(protocol==RC6) {
+                    auto& toggle=signal.legacyBits==kRC6_36Bits?rc6LongToggle:rc6Toggle;
+                    value=toggle.apply(value,_sender->toggleRC6(0,signal.legacyBits),_txRepeat);
+                }
+                ok=protocol!=UNKNOWN && !hasACState(protocol) &&
+                    _sender->send(protocol,value,signal.legacyBits);
+            }
         }
         _sender->space(0);
+        ok=ok && _sender->carrierReady();
+        Serial.printf("[Infrared TX] hardware carrier=%.1f Hz ready=%u\n",
+            _sender->carrierFrequency(),unsigned(_sender->carrierReady()));
+        Serial.printf("[Infrared TX] complete: ok=%u cancelled=%u\n",
+            unsigned(ok),unsigned(_txCancel.load()));
         _txSucceeded.store(ok);
         _txBusy.store(false);
     }

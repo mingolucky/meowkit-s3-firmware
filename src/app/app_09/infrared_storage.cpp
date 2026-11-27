@@ -1,5 +1,7 @@
 #include "infrared.h"
 #include <cstring>
+#include "../../system/storage_directory.h"
+#include "../../system/sd_write_file.h"
 
 namespace {
 bool splitLine(String line, String& key, String& value) {
@@ -27,7 +29,7 @@ bool header(File& file, bool library) {
     return type == (library ? "IR library file" : "IR signals file") && version == "1";
 }
 
-bool readRecord(File& file, meow_ir::Signal& signal, String& error) {
+template<class Reader> bool readRecord(Reader& file, meow_ir::Signal& signal, String& error) {
     meow_ir::RecordParser parser;
     bool begun = false;
     while (file.available()) {
@@ -58,6 +60,28 @@ String basename(const String& path) {
 } // namespace
 
 namespace MOONCAKE::APPS {
+void App09::_startSavedMatchSearch() {
+    _savedAdvancePending=false;
+    _savedSearch.clear();
+    _savedCheckUnavailable=!_storageReady();
+    if(!_savedCheckUnavailable) _savedSearch.begin(_learned,millis());
+    _dirty=true;
+}
+void App09::_runSavedMatchSearch() {
+    if(!_savedSearch.running() || _txBusy.load()) return;
+    const auto count=_savedSearch.matches.size();
+    const auto started=millis();
+    for(unsigned steps=0;steps<32 && _savedSearch.running() && millis()-started<4;++steps)
+        _savedSearch.step(millis());
+    if(count!=_savedSearch.matches.size() || !_savedSearch.running()) {
+        if(_scene==Scene::SavedMatches) _enter();
+        _dirty=true;
+    }
+}
+bool App09::_storageReady() {
+    if (!_device->sd.begin()) { _lastError="SD card unavailable; reinsert and retry"; return false; }
+    return true;
+}
 bool App09::_loadRemote(const String& path) {
     File file = SD_MMC.open(path, FILE_READ);
     if (!file || !header(file, false)) {
@@ -81,6 +105,9 @@ bool App09::_loadRemote(const String& path) {
         file.seek(next);
         meow_ir::Signal signal;
         if (!readRecord(file, signal, _lastError)) return false;
+        Serial.printf("[Infrared LOAD] %s: %s raw=%u bits=%u value=0x%llX state_bytes=%u\n",path.c_str(),
+            signal.name.c_str(),unsigned(signal.raw),unsigned(signal.legacyBits),
+            static_cast<unsigned long long>(signal.legacyValue),unsigned(signal.legacyState.size()));
         loaded.push_back(std::move(signal));
     }
     _signals = std::move(loaded);
@@ -90,6 +117,16 @@ bool App09::_loadRemote(const String& path) {
 }
 
 bool App09::_writeRemote(const String& path, const std::vector<meow_ir::Signal>& signals, bool create) {
+    if (!_storageReady()) return false;
+    std::string folderError;
+    const std::string parent=std::string(path.c_str()).substr(0,path.lastIndexOf('/'));
+    if (!meow_storage::ensureDirectory(SD_MMC,parent,folderError)) {
+        Serial.printf("[Infrared] Folder preparation for %s: %s; free=%llu total=%llu\n",
+            path.c_str(),folderError.c_str(),
+            (unsigned long long)(SD_MMC.totalBytes()-SD_MMC.usedBytes()),
+            (unsigned long long)SD_MMC.totalBytes());
+        _lastError=folderError.c_str(); return false;
+    }
     if (path.length() > 220 || signals.size() > meow_ir::MaxButtons) { _lastError = "Remote too large"; return false; }
     for (const auto& signal : signals) {
         if (!meow_ir::validSignal(signal)) { _lastError = "Invalid signal; original kept"; return false; }
@@ -102,22 +139,26 @@ bool App09::_writeRemote(const String& path, const std::vector<meow_ir::Signal>&
     }
     const bool existed = SD_MMC.exists(path);
     if (create && existed) { _lastError = "File already exists"; return false; }
-    File file = SD_MMC.open(temporary, FILE_WRITE);
-    if (!file) { _lastError = "Cannot create temporary file"; return false; }
-    size_t expected = 0;
+    const int slash=temporary.lastIndexOf('/');
+    const String folder=String("/sdcard")+temporary.substring(0,slash);
+    const String filename=temporary.substring(slash+1);
+    meow_storage::WriteFile file;
+    if (!file.open(folder.c_str(),filename.c_str())) {
+        _lastError=String("SD ")+file.operation()+": "+strerror(file.errorCode());
+        Serial.printf("[Infrared] %s (%d)\n",_lastError.c_str(),file.errorCode()); return false;
+    }
     bool ok = true;
     auto write = [&](const std::string& text) {
-        expected += text.size();
         ok &= file.write(reinterpret_cast<const uint8_t*>(text.data()), text.size()) == text.size();
     };
     write("Filetype: IR signals file\nVersion: 1\n");
     for (const auto& signal : signals) { write(meow_ir::serialize(signal)); yield(); }
-    file.flush();
-    ok &= file.size() == expected;
-    file.close();
+    ok &= file.sync();
+    if (!file.close()) ok=false;
     if (!ok) {
         SD_MMC.remove(temporary);
-        _lastError = "Write failed; original kept";
+        _lastError = String("SD ")+file.operation()+": "+strerror(file.errorCode());
+        Serial.printf("[Infrared] %s (%d); original kept\n",_lastError.c_str(),file.errorCode());
         return false;
     }
     if (existed && !SD_MMC.rename(path, backup)) {
@@ -132,6 +173,7 @@ bool App09::_writeRemote(const String& path, const std::vector<meow_ir::Signal>&
         return false;
     }
     if (existed) SD_MMC.remove(backup);
+    Serial.printf("[Infrared] Saved %u button(s) to %s\n",unsigned(signals.size()),path.c_str());
     return true;
 }
 
@@ -191,11 +233,11 @@ bool App09::_emptyDirectory(const String& path) {
 }
 
 bool App09::_beginLibraryLoad(const String& path, Scene destination) {
-    _loadingFile = SD_MMC.open(path);
+    _loadingFile.open(path);
     if (!_loadingFile || _loadingFile.isDirectory()) { _loadingFile.close(); _lastError = "Cannot open IR library"; return false; }
     _records.clear(); _actions.clear();
     _loadType = _loadVersion = ""; _loadHeaderChecked = false;
-    _libraryPath = path; _libraryTitle = basename(path);
+    _libraryPath = path; _libraryTitle = path.startsWith("builtin:")?path.substring(8):basename(path);
     _loadDestination = destination;
     _push(Scene::Loading);
     return true;
@@ -252,7 +294,7 @@ void App09::_runLibraryLoad() {
 }
 
 bool App09::_readRecord(const LibraryRecord& record, meow_ir::Signal& signal) {
-    File file = SD_MMC.open(_libraryPath);
+    meow_ir::LibraryFile file; file.open(_libraryPath);
     if (!file || !file.seek(record.offset)) { _lastError = "Library removed or unreadable"; return false; }
     if (!readRecord(file, signal, _lastError)) return false;
     if (record.action >= _actions.size() || !_actions[record.action].equalsIgnoreCase(signal.name.c_str())) {

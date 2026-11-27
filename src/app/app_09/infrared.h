@@ -7,9 +7,13 @@
 #include "../../bsp/devices.h"
 #include <IRrecv.h>
 #include <IRsend.h>
+#include "infrared_sender.h"
 #include <SD_MMC.h>
 #include "../app_common/hp_ui.h"
 #include "infrared_signal.h"
+#include "infrared_power.h"
+#include "infrared_saved_match.h"
+#include "infrared_library_file.h"
 #include <atomic>
 
 namespace MOONCAKE::APPS {
@@ -23,17 +27,20 @@ public:
 private:
     enum class Scene : uint8_t {
         Main, Files, Remote, Learn, Result, Discard, Name, Edit, ButtonSelect,
-        Move, Delete, Universal, Loading, Panel, Actions, Scan, Message
+        Move, Delete, Universal, Loading, Panel, Actions, Scan, SaveScan, SavedMatches, Message
     };
-    enum class NameFor : uint8_t { Learn, Button, Remote };
+    enum class NameFor : uint8_t { Learn, Power, Button, Remote, ScanRemote, ScanButton };
     enum class EditFor : uint8_t { Rename, Move, Delete };
     struct Input {
         bool up = false, down = false, left = false, right = false;
-        bool a = false, b = false, held = false;
+        bool a = false, b = false, held = false, rightEdge=false;
     } _input;
     meow_ir::DirectionRepeat _directionRepeat[4];
     struct Item { String title, subtitle; };
-    struct Frame { Scene scene; int selected, top; String directory; };
+    struct Frame {
+        Scene scene; int selected, top; String directory;
+        bool libraryBrowser=false,saveDestination=false;
+    };
     struct LibraryRecord { uint16_t action; uint32_t offset; };
 
     DEVICES* _device;
@@ -45,11 +52,20 @@ private:
     String _directory = "/infrared";
     std::vector<String> _entries;
     bool _libraryBrowser = false;
+    bool _saveScanToExisting=false;
+    meow_ir::Signal _scanSignal;
 
     std::vector<meow_ir::Signal> _signals;
     String _remotePath, _remoteName;
     meow_ir::Signal _learned;
+    meow_ir::SavedCommandSearch<fs::SDMMCFS> _savedSearch{SD_MMC};
+    bool _savedCheckUnavailable=false;
+    bool _savedAdvancePending=false;
     bool _learningNew = true, _easy = false;
+    bool _powerLearning=false,_powerHaveOn=false;
+    meow_ir::Signal _powerOn;
+    meow_ir::PowerPress _powerPress;
+    int _powerSignalIndex=-1;
     uint8_t _decodeMode = 0; // Auto, Decode only, RAW
     size_t _easyIndex = 0;
     Scene _learnOrigin = Scene::Main;
@@ -72,7 +88,7 @@ private:
     bool _scanPending = false;
     uint32_t _lastScan = 0, _lastDraw = 0;
     String _scanName;
-    File _loadingFile;
+    meow_ir::LibraryFile _loadingFile;
     Scene _loadDestination = Scene::Panel;
     String _loadType, _loadVersion;
     bool _loadHeaderChecked = false;
@@ -80,7 +96,7 @@ private:
     String _messageTitle, _messageDetail, _lastError;
     uint32_t _messageUntil = 0;
     IRrecv* _receiver = nullptr;
-    IRsend* _sender = nullptr;
+    meow_ir::PwmIRsend* _sender = nullptr;
     InfraredDecoderHandler* _decoder = nullptr;
     bool _rxEnabled = false;
     TaskHandle_t _txTask = nullptr;
@@ -114,10 +130,16 @@ private:
     void _updateLed();
     void _message(const char* title, const String& detail, uint32_t duration = 0);
     bool _navigate();
-    void _openFiles(bool library);
+    void _openFiles(bool library,bool saveDestination=false);
     void _refreshFiles();
     void _startLearn(bool newRemote);
+    void _startPowerLearn(bool newRemote);
+    void _keepPowerCapture();
+    void _runPower(meow_ir::Signal& signal);
+    void _finishPowerSend();
     void _receive();
+    void _startSavedMatchSearch();
+    void _runSavedMatchSearch();
     void _beginName(NameFor kind, const char* initial);
     void _commitName();
     void _finishLearn();
@@ -128,9 +150,12 @@ private:
     void _loadCategory(int category);
     void _startScan(const String& name);
     void _runScan();
+    void _beginScanSave();
+    void _saveScanSignal(const char* name,bool newRemote);
 
     bool _loadRemote(const String& path);
     bool _writeRemote(const String& path, const std::vector<meow_ir::Signal>& signals, bool create);
+    bool _storageReady();
     bool _beginLibraryLoad(const String& path, Scene destination);
     void _runLibraryLoad();
     void _failLibraryLoad(const String& error);

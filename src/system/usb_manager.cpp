@@ -40,19 +40,22 @@ void usb_manager_poll(void)
 {
 #if ARDUINO_USB_MODE == 0 && ARDUINO_USB_CDC_ON_BOOT
     if (!s_download_requested.exchange(false)) return;
-    usb_manager_request(USB_MODE_NONE);
+    if(!usb_manager_request(USB_MODE_NONE)) {
+        s_download_requested.store(true); // Retry after raw transfers drain.
+        return;
+    }
     settings_flush();
     delay(150); // USB SET_LINE_CODING must finish before removing the PHY.
     usb_download_restart();
 #endif
 }
 
-static void _teardown(usb_mode_t mode)
+static bool _teardown(usb_mode_t mode)
 {
     switch (mode) {
-        case USB_MODE_MSC: usb_msc_disable(); break;
-        case USB_MODE_HID: usb_hid_disable(); break;
-        default: break;
+        case USB_MODE_MSC: usb_msc_disable(); return !usb_msc_is_active();
+        case USB_MODE_HID: usb_hid_disable(); return true;
+        default: return true;
     }
 }
 
@@ -69,7 +72,7 @@ static int _bring_up(usb_mode_t mode)
 int usb_manager_request(usb_mode_t mode)
 {
     usb_manager_init();
-    if (s_active == mode) return 1;
+    if (s_active == mode) return mode==USB_MODE_MSC?usb_msc_enable():1;
 
     /* Drain CDC TX before touching the USB stack — prevents data loss and
      * avoids the host seeing a mid-packet disconnect. */
@@ -77,11 +80,15 @@ int usb_manager_request(usb_mode_t mode)
     delay(20);
 
     usb_mode_t prev = s_active;
-    _teardown(prev);
+    if(!_teardown(prev)) {
+        Serial.println("[USB_MGR] Storage still draining; ownership retained");
+        return 0;
+    }
     s_active = USB_MODE_NONE;
 
     int ok = _bring_up(mode);
     if (ok) s_active = mode;
+    else if(usb_msc_is_active()) s_active=USB_MODE_MSC; // Retained resources must remain releasable.
 
     Serial.printf("[USB_MGR] %d → %d (%s)\n", (int)prev, (int)mode, ok ? "ok" : "fail");
     return ok;

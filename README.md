@@ -19,3 +19,12 @@ Active contributors may be eligible to receive a MeowKit device for development 
 **[info@whiteclifftech.com](mailto:info@whiteclifftech.com)**
 
 Maintained by Mingo and the MeowKit community.
+
+## Device fixes and added features
+
+- [Air Mouse](src/app/app_06/README.md): Bluetooth reconnects, calibration, cursor, clicks and scrolling.
+- [Infrared](src/app/app_09/README.md): bundled universal libraries, saving working signals, native AC states, paired Power and saved-command identification.
+- [BLE Scanner](src/app/app_12/README.md): discovery, advertisement details, PAL hints and an optional target filter.
+- [SD, USB storage and power](docs/storage-usb.md): mounting, copying files, safe close/reopen, idle behavior and troubleshooting.
+- [Legacy SD recovery](docs/sd-recovery.md): verified backups, correct-partition restoration and the completion marker.
+- [Build and verification](docs/build-and-test.md): pinned toolchain, firmware build and host regression commands.

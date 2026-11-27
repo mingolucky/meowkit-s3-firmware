@@ -51,7 +51,7 @@ static void ui_event_msc_button_click(lv_event_t * e)
     /* Guard: SD card must be present before enabling MSC.
      * Without a card the host would enumerate an empty drive and MSC init
      * may panic the SD driver when it tries to read the block count. */
-    if (!ui_sd_present()) {
+    if (!ui_sd_present() && !ui_sd_recovery_blocked()) {
         _ui_screen_change(&ui_usb_msc, LV_SCR_LOAD_ANIM_FADE_ON, 350, 0, &ui_usb_msc_screen_init);
         if(ui_usb_msc_label) lv_label_set_text(ui_usb_msc_label, "no SD card — insert and retry");
         return;

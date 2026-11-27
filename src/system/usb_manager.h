@@ -29,7 +29,8 @@ void usb_manager_poll(void);
 
 /** Request a USB mode.
  *  If another mode is active it is torn down first.
- *  Returns 1 on success, 0 on failure (previous mode is also stopped). */
+ *  Returns 1 on success, 0 on failure. A mode with pending IO retains
+ *  ownership until teardown finishes; another mode cannot start meanwhile. */
 int  usb_manager_request(usb_mode_t mode);
 
 /** Release ownership of a mode (no-op if mode is not the active one).
